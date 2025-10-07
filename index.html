@@ -2005,7 +2005,6 @@
             font-family: var(--font-body); 
             background-color: var(--bg-color);
             color: #e2e8f0;
-            overflow: hidden;
         }
         #starfield-bg {
             position: fixed;
@@ -2119,7 +2118,7 @@
 <body class="bg-gray-900">
     <canvas id="starfield-bg"></canvas>
     <div id="night-overlay"></div>
-    <div id="app-container" class="min-h-screen flex items-center justify-center p-2 sm:p-4 relative">
+    <div id="app-container" class="min-h-screen flex justify-center p-4 sm:p-6 pt-10 sm:pt-16 pb-20 relative">
         <div id="nickname-screen" class="screen w-full max-w-md">
             <div class="screen-panel">
                 <h1 class="title-text text-3xl font-bold text-center mb-2">에이전트 코드명</h1>
@@ -2228,7 +2227,7 @@
                 </div>
             </div>
         </div>
-        <div id="game-screen" class="screen hidden w-full h-full p-2 sm:p-4 flex flex-col">
+        <div id="game-screen" class="screen hidden w-full p-2 sm:p-4 flex flex-col">
              <div id="hud" class="screen-panel flex flex-col sm:flex-row justify-between items-center p-2 gap-2 flex-shrink-0">
                 <div id="hud-player-info" class="flex items-center space-x-2 text-cyan-400 text-sm sm:text-base"></div>
                 <div id="hud-phase" class="text-lg sm:text-2xl font-bold text-yellow-400 font-orbitron text-center"></div>
@@ -2242,7 +2241,7 @@
                      </button>
                 </div>
             </div>
-            <div id="game-main-content" class="flex-grow my-2 sm:my-4 grid grid-cols-1 lg:grid-cols-2 gap-4 content-start overflow-y-auto pr-2">
+            <div id="game-main-content" class="flex-grow my-2 sm:my-4 grid grid-cols-1 lg:grid-cols-2 gap-4 content-start pr-2">
             </div>
             <div id="host-controls" class="w-full text-center py-2 flex-shrink-0 flex justify-center items-center gap-4">
                 <button id="host-proceed-btn" class="hidden bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-8 rounded-lg text-xl transition-all duration-300 transform hover:scale-105">다음 단계로 진행</button>
@@ -2443,3 +2442,4 @@
     </div>
 </body>
 </html>
+
