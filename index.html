@@ -26,6 +26,7 @@
         let isDevMode = false;
         let actingBotId = null;
         let selectedGameMode = 'classic';
+        let myInitialRoleForReveal = null;
 
         // --- 카드 정의 ---
         const abilityCardDeck = {
@@ -50,6 +51,7 @@
                 gameStart: new Tone.Synth({ oscillator: { type: "fmtriangle", modulationType: "sawtooth", modulationIndex: 2 }, envelope: { attack: 0.1, decay: 0.4, sustain: 0.5, release: 0.8 } }).toDestination(),
                 phaseChange: new Tone.AMSynth().toDestination(),
                 timerTick: new Tone.MembraneSynth({ pitchDecay: 0.01, octaves: 2, envelope: { attack: 0.001, decay: 0.1, sustain: 0.01, release: 0.01 } }).toDestination(),
+                roleReveal: new Tone.NoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.2 } }).toDestination(),
             };
         }
         function playSound(soundName) {
@@ -58,127 +60,31 @@
                 if (Tone.context.state !== 'running') {
                     Tone.context.resume();
                 }
+                const now = Tone.now();
                 switch(soundName) {
-                    case 'click': sounds.click.triggerAttackRelease("C5", "8n"); break;
-                    case 'popupOpen': sounds.popupOpen.triggerAttackRelease("G4", "8n"); break;
-                    case 'gameStart': sounds.gameStart.triggerAttackRelease("C4", "2n"); break;
-                    case 'phaseChange': sounds.phaseChange.triggerAttackRelease("C3", "1n"); break;
-                    case 'timerTick': sounds.timerTick.triggerAttackRelease("C2", "8n"); break;
+                    case 'click': sounds.click.triggerAttackRelease("C5", "8n", now); break;
+                    case 'popupOpen': sounds.popupOpen.triggerAttackRelease("G4", "8n", now); break;
+                    case 'gameStart': sounds.gameStart.triggerAttackRelease("C4", "2n", now); break;
+                    case 'phaseChange': sounds.phaseChange.triggerAttackRelease("C3", "1n", now); break;
+                    case 'timerTick': sounds.timerTick.triggerAttackRelease("C2", "8n", now); break;
+                    case 'roleReveal': sounds.roleReveal.triggerAttackRelease("4n", now); break;
                 }
             } catch (e) { console.error("Sound play error:", e); }
         }
 
-        // --- 초기화 ---
-        window.onload = () => {
-            initializeSounds();
-            startStarfield(); 
+        // --- 모든 함수 정의 ---
 
-            const urlParams = new URLSearchParams(window.location.search);
-            isDevMode = urlParams.get('dev') === 'true';
-            if (isDevMode) {
-                console.warn("개발자 모드가 활성화되었습니다.");
-            }
-            
-            try {
-                let firebaseConfig;
-                if (typeof __firebase_config !== 'undefined') {
-                    firebaseConfig = JSON.parse(__firebase_config);
-                } else {
-                    console.warn("로컬 개발용 Firebase 임시 설정을 사용합니다. 배포 시에는 실제 설정으로 교체해야 합니다.");
-                    firebaseConfig = {
-                        apiKey: "AIzaSyCrgCH3e-lmd79bb-aU74QfZUfvI8_m0vI",
-                        authDomain: "aeon-game-726d8.firebaseapp.com",
-                        projectId: "aeon-game-726d8",
-                        storageBucket: "aeon-game-726d8.appspot.com",
-                        messagingSenderId: "1031494860943",
-                        appId: "1:1031494860943:web:ca3acac820e0e67a4830fa"
-                    };
-                }
-
-                const app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-                
-                onAuthStateChanged(auth, async (user) => {
-                    if (user) {
-                        localPlayer.id = user.uid;
-                    } else {
-                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                            try {
-                                await signInWithCustomToken(auth, __initial_auth_token);
-                            } catch (error) {
-                                console.error("Custom token sign-in failed, falling back to anonymous", error);
-                                await signInAnonymously(auth);
-                            }
-                        } else {
-                            await signInAnonymously(auth);
-                        }
-                    }
-                });
-
-            } catch (error) {
-                console.error("Firebase 초기화 실패:", error);
-                document.body.innerHTML = '<div style="color: white; text-align: center; padding: 50px; font-size: 1.2rem;">Firebase 초기화에 실패했습니다. 설정을 확인해주세요.</div>';
-                return;
-            }
-
-
-            // 이벤트 리스너 등록
-            document.querySelectorAll('button').forEach(button => {
-                button.addEventListener('click', () => playSound('click'));
-            });
-            document.getElementById('create-room-btn').addEventListener('click', () => showScreen('create-mode-selection-screen'));
-            document.getElementById('join-room-btn').addEventListener('click', () => showScreen('join-mode-selection-screen'));
-            document.getElementById('close-popup-btn').addEventListener('click', hideCreateRoomPopup);
-            document.getElementById('submit-create-room-btn').addEventListener('click', createRoom);
-            document.getElementById('nickname-submit-btn').addEventListener('click', setNicknameAndShowMain);
-            document.getElementById('ready-btn').addEventListener('click', toggleReady);
-            document.getElementById('start-game-btn').addEventListener('click', startGame);
-            document.getElementById('back-to-lobby-btn').addEventListener('click', backToLobby);
-            document.getElementById('back-to-main-menu-btn').addEventListener('click', () => {
-                 if (roomListUnsubscribe) roomListUnsubscribe();
-                showScreen('main-menu-screen');
-            });
-            document.getElementById('back-to-main-from-create-select').addEventListener('click', () => showScreen('main-menu-screen'));
-            document.getElementById('back-to-main-from-join-select').addEventListener('click', () => showScreen('main-menu-screen'));
-
-            document.getElementById('leave-room-btn-lobby').addEventListener('click', showConfirmLeavePopup);
-            document.getElementById('leave-room-btn-game').addEventListener('click', showConfirmLeavePopup);
-            document.getElementById('cancel-leave-btn').addEventListener('click', hideConfirmLeavePopup);
-            document.getElementById('confirm-leave-btn').addEventListener('click', () => leaveRoom(false));
-            document.getElementById('host-proceed-btn').addEventListener('click', hostProceedPhase);
-            document.getElementById('host-skip-timer-btn').addEventListener('click', hostProceedPhase);
-            document.getElementById('host-apply-observation-cards-btn').addEventListener('click', hostApplyObservationCards);
-            document.getElementById('rulebook-btn-main').addEventListener('click', showRulebookPopup);
-            document.getElementById('rulebook-btn-game').addEventListener('click', showRulebookPopup);
-            document.getElementById('close-rulebook-btn').addEventListener('click', hideRulebookPopup);
-            document.getElementById('close-custom-alert-btn').addEventListener('click', hideCustomAlert);
-            document.getElementById('event-log-btn').addEventListener('click', showEventLogPopup);
-            document.getElementById('close-event-log-btn').addEventListener('click', hideEventLogPopup);
-            
-            // --- 카오스 모드 전역 함수 ---
-            window.hideActionPopup = hideActionPopup;
-            window.confirmUseCard = confirmUseCard;
-            window.submitCardAction = submitCardAction;
-            window.requestRemeasure = requestRemeasure;
-            window.hostControlBotCard = hostControlBotCard;
-
-
-            showScreen('nickname-screen');
-        };
-
-        // --- 화면 전환 관리 ---
         function showScreen(screenId) {
             document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
             const screenToShow = document.getElementById(screenId);
             if(screenToShow) {
                 screenToShow.classList.remove('hidden');
-                playSound('popupOpen');
+                if (screenId !== 'game-screen') playSound('popupOpen');
             }
         }
 
-        // --- 닉네임 설정 ---
         function setNicknameAndShowMain() {
+            playSound('click');
             const nicknameInput = document.getElementById('nickname-input');
             const nickname = nicknameInput.value.trim();
             if (nickname && nickname.length > 0 && nickname.length <= 10) {
@@ -189,18 +95,21 @@
             }
         }
 
-        // --- 팝업 관리 ---
         function showCreateRoomPopup() { 
             playSound('popupOpen');
             document.getElementById('create-room-popup').classList.remove('hidden'); 
         }
-        function hideCreateRoomPopup() { document.getElementById('create-room-popup').classList.add('hidden'); }
+        function hideCreateRoomPopup() { 
+            playSound('click');
+            document.getElementById('create-room-popup').classList.add('hidden'); 
+        }
         
         function showRulebookPopup() {
             playSound('popupOpen');
             document.getElementById('rulebook-popup').classList.remove('hidden');
         }
         function hideRulebookPopup() {
+            playSound('click');
             document.getElementById('rulebook-popup').classList.add('hidden');
         }
 
@@ -217,6 +126,7 @@
             popup.classList.remove('hidden');
         }
         function hideConfirmLeavePopup() {
+            playSound('click');
             document.getElementById('confirm-leave-popup').classList.add('hidden');
         }
 
@@ -239,11 +149,11 @@
         }
 
         function hideEventLogPopup() {
+            playSound('click');
             document.getElementById('event-log-popup').classList.add('hidden');
         }
 
 
-        // --- 방 목록 ---
         function showRoomList(gameMode) {
             showScreen('room-list-screen');
             const roomListEl = document.getElementById('room-list-container');
@@ -278,18 +188,9 @@
                 roomListEl.innerHTML = '<div class="text-white text-center">방 목록을 불러오는 중 오류가 발생했습니다.</div>';
             });
         }
-
-        // --- 방 생성/참가 ---
-        window.selectCreateMode = (mode) => {
-            selectedGameMode = mode;
-            showCreateRoomPopup();
-        }
-
-        window.selectJoinMode = (mode) => {
-            showRoomList(mode);
-        }
-
+        
         async function createRoom() {
+            playSound('click');
             const roomName = document.getElementById('room-name-input').value.trim();
             const password = document.getElementById('password-input').value.trim();
             if (!roomName) { showCustomAlert('방 이름을 입력해주세요.'); return; }
@@ -309,6 +210,7 @@
                     players: {}, 
                     status: 'waiting', createdAt: serverTimestamp(), 
                     gameMode: selectedGameMode,
+                    totalRounds: 4, // 라운드 설정 기본값
                     minPlayers: isDevMode ? 1 : 4,
                     maxPlayers: 12,
                     eventLog: []
@@ -322,7 +224,8 @@
             } catch (error) { console.error("Error creating room:", error); showCustomAlert('방 생성에 실패했습니다.'); }
         }
         
-        window.joinRoom = async (roomId, hasPassword) => {
+        async function joinRoom(roomId, hasPassword) {
+            playSound('click');
             localPlayer.isHost = false;
             
             if (hasPassword) {
@@ -383,7 +286,6 @@
             }
         }
 
-        // --- 로컬 상태 초기화 ---
         function resetLocalState() {
             if (roomUnsubscribe) roomUnsubscribe();
             if (roomListUnsubscribe) roomListUnsubscribe();
@@ -399,7 +301,6 @@
             actingBotId = null;
         }
 
-        // --- 실시간 방 정보 구독 ---
         function subscribeToRoom(roomId) {
             const roomRef = doc(db, 'rooms', roomId);
             if (roomUnsubscribe) roomUnsubscribe();
@@ -416,9 +317,25 @@
                         console.log("Not involved in this room. No UI updates.");
                         return;
                     }
-
+                    
+                    // 게임 시작 시 역할 공개 연출
                     if (currentRoomData.status === 'playing' && oldRoomData?.status === 'waiting') {
                          if(gameTimerInterval) clearInterval(gameTimerInterval);
+                         if (amIPlayer) {
+                             myInitialRoleForReveal = currentRoomData.players[localPlayer.id].initialRole;
+                             showRoleRevealPopup();
+                         } else { // 호스트는 바로 게임 화면으로
+                             showScreen('game-screen');
+                             updateGameUI(currentRoomData);
+                         }
+                    } else {
+                        // 일반적인 UI 업데이트
+                        if (currentRoomData.status === 'waiting') {
+                            showScreen('lobby-screen');
+                            updateLobbyUI(currentRoomData);
+                        } else {
+                            updateGameUI(currentRoomData);
+                        }
                     }
 
                     // --- 카오스 모드: 정보 열람 카드 결과 표시 ---
@@ -427,23 +344,17 @@
                         // 결과가 새로 생겼을 때만 팝업을 띄웁니다.
                         if(myCardActionResult && JSON.stringify(myCardActionResult) !== JSON.stringify(oldRoomData.cardActionResults?.[localPlayer.id])) {
                              if(myCardActionResult.cardId === 'info_read') {
-                                const target = currentRoomData.players[myCardActionResult.targetId];
-                                const chipsHtml = target.quantumState.map(chip => 
-                                    `<div class="w-8 h-8 rounded ${chip === 'AEON' ? 'bg-red-500 neon-red-sm' : 'bg-blue-500 neon-blue-sm'}"></div>`
-                                ).join('');
-                                showCustomAlertWithHTML(`[기밀 정보 열람 결과]<br>${target.nickname}님의 상태판입니다:<br><div class="flex justify-center gap-2 mt-4">${chipsHtml}</div>`);
-                            } else if (myCardActionResult.cardId === 'info_trace' && myCardActionResult.details) {
-                                showCustomAlertWithHTML(`[암호 해독기 결과]<br>${myCardActionResult.details}`);
-                            }
+                                 const target = currentRoomData.players[myCardActionResult.targetId];
+                                 const chipsHtml = target.quantumState.map(chip => 
+                                     `<div class="w-8 h-8 rounded ${chip === 'AEON' ? 'bg-red-500 neon-red-sm' : 'bg-blue-500 neon-blue-sm'}"></div>`
+                                 ).join('');
+                                 showCustomAlertWithHTML(`[기밀 정보 열람 결과]<br>${target.nickname}님의 상태판입니다:<br><div class="flex justify-center gap-2 mt-4">${chipsHtml}</div>`);
+                             } else if (myCardActionResult.cardId === 'info_trace' && myCardActionResult.details) {
+                                 showCustomAlertWithHTML(`[암호 해독기 결과]<br>${myCardActionResult.details}`);
+                             }
                         }
                     }
 
-                    if (currentRoomData.status === 'waiting') {
-                        showScreen('lobby-screen');
-                        updateLobbyUI(currentRoomData);
-                    } else {
-                        updateGameUI(currentRoomData);
-                    }
                 } else {
                     resetLocalState();
                     showCustomAlert('호스트가 방을 떠나 메인 화면으로 돌아갑니다.');
@@ -452,9 +363,8 @@
             });
         }
         
-        // --- 로비 UI 업데이트 ---
         function updateLobbyUI(room) {
-            const { host, players, minPlayers, maxPlayers } = room;
+            const { host, players, minPlayers, maxPlayers, totalRounds, gameMode } = room;
             if (!players) return;
             const playerList = Object.values(players).sort((a, b) => a.number - b.number);
             const playerCount = playerList.length;
@@ -463,16 +373,24 @@
             document.getElementById('lobby-room-id').innerText = currentRoomId;
             document.getElementById('host-info').innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-user-crown text-cyan-300"><path d="M12 6.5a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Z"/><path d="M12 12.5a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Z"/><path d="M15.5 8.75a4.5 4.5 0 1 0 0-6.5 4.5 4.5 0 0 0 0 6.5Z"/><path d="M12.5 12.5a4.5 4.5 0 1 1 9 0 4.5 4.5 0 0 1-9 0Z"/><path d="M12 15.583c-2.333.667-3.5 2.5-3.5 4.417V22h7v-2c0-1.917-1.167-3.75-3.5-4.417Z"/><path d="m18.5 14-1-1-1 1"/><path d="m18.5 18 1-1 1 1"/></svg><span class="font-bold">${host.nickname}</span>`;
 
+            const roundInfoEl = document.getElementById('round-info');
+            roundInfoEl.innerHTML = `<span class="font-bold">총 라운드:</span> <span class="text-yellow-400">${totalRounds || 4}</span>`;
+
             const playerSlotsEl = document.getElementById('player-slots');
             playerSlotsEl.innerHTML = '';
             
+            const entangledPairs = room.entangledPairs || [];
+            const entangledPlayerIds = entangledPairs.flat();
+
             playerList.forEach(p => {
+                    const isEntangled = entangledPlayerIds.includes(p.id);
                     playerSlotsEl.innerHTML += `
                         <div class="bg-black/20 p-4 rounded-lg shadow-inner-dark">
                              <div class="flex items-center justify-between">
                                  <div class="flex items-center space-x-3">
                                      <div class="bg-orange-500 text-white font-bold rounded-full w-8 h-8 flex items-center justify-center text-lg shadow-lg">${p.number}</div>
                                      <span class="text-white text-lg font-bold">${p.nickname}</span>
+                                     ${isEntangled ? '<span title="양자 얽힘 상태">🔗</span>' : ''}
                                  </div>
                                  <span class="${p.isReady ? 'text-cyan-400' : 'text-gray-400'} font-bold">${p.isReady ? '준비완료' : '대기중'}</span>
                              </div>
@@ -481,11 +399,28 @@
             
             const emptySlotsCount = maxPlayers - playerCount;
              for (let i = 0; i < emptySlotsCount; i++) {
-                if (isDevMode && localPlayer.isHost) {
-                     playerSlotsEl.innerHTML += `<button onclick="addBotPlayer()" class="bg-green-800/20 p-4 rounded-lg flex items-center justify-center border-2 border-dashed border-green-600/50 hover:bg-green-700/30 transition-colors"><span class="text-green-400">봇 추가</span></button>`;
-                } else {
-                     playerSlotsEl.innerHTML += `<div class="bg-black/20 p-4 rounded-lg flex items-center justify-center border-2 border-dashed border-gray-600/50"><span class="text-gray-500">빈 슬롯</span></div>`;
-                }
+                 if (isDevMode && localPlayer.isHost) {
+                      playerSlotsEl.innerHTML += `<button onclick="addBotPlayer()" class="bg-green-800/20 p-4 rounded-lg flex items-center justify-center border-2 border-dashed border-green-600/50 hover:bg-green-700/30 transition-colors"><span class="text-green-400">봇 추가</span></button>`;
+                 } else {
+                      playerSlotsEl.innerHTML += `<div class="bg-black/20 p-4 rounded-lg flex items-center justify-center border-2 border-dashed border-gray-600/50"><span class="text-gray-500">빈 슬롯</span></div>`;
+                 }
+            }
+
+            const roundSelectionContainer = document.getElementById('round-selection-container');
+            if (localPlayer.isHost) {
+                roundSelectionContainer.classList.remove('hidden');
+                [4, 5, 6].forEach(round => {
+                    const btn = document.getElementById(`round-btn-${round}`);
+                    if (btn) {
+                        const isSelected = (totalRounds || 4) === round;
+                        btn.classList.toggle('bg-cyan-600', isSelected);
+                        btn.classList.toggle('text-white', isSelected);
+                        btn.classList.toggle('border-cyan-300', isSelected);
+                        btn.classList.toggle('btn-secondary', !isSelected);
+                    }
+                });
+            } else {
+                roundSelectionContainer.classList.add('hidden');
             }
 
             document.getElementById('ready-btn').classList.toggle('hidden', localPlayer.isHost);
@@ -493,7 +428,7 @@
 
             if(localPlayer.isHost) {
                 const readyPlayerCount = playerList.filter(p => p.isReady).length;
-                const canStart = isDevMode ? (playerCount >= minPlayers) : (playerCount >= minPlayers && readyPlayerCount === playerCount);
+                const canStart = isDevMode ? (playerCount >= minPlayers) : (playerCount >= minPlayers && readyPlayerCount === playerCount -1);
                 const startGameBtn = document.getElementById('start-game-btn');
                 startGameBtn.disabled = !canStart;
                 startGameBtn.classList.toggle('neon-cyan', canStart);
@@ -515,8 +450,8 @@
             }
         }
         
-        // --- 준비 토글 ---
         async function toggleReady() {
+            playSound('click');
             if (!currentRoomId || localPlayer.isHost) return;
             const roomRef = doc(db, 'rooms', currentRoomId);
             const playerRef = `players.${localPlayer.id}.isReady`;
@@ -527,23 +462,27 @@
             }
         }
 
-        // --- 방 나가기 ---
-        window.addEventListener('beforeunload', () => { if (currentRoomId) leaveRoom(true) });
         async function leaveRoom(isUnload) {
             hideConfirmLeavePopup();
             if (!currentRoomId) return;
 
             const isHost = localPlayer.isHost;
             const localIdBeforeLeave = currentRoomId;
+
+            if (roomUnsubscribe) {
+                roomUnsubscribe();
+                roomUnsubscribe = null;
+            }
             
             try {
                 const roomRef = doc(db, 'rooms', localIdBeforeLeave);
                 if (isHost) {
                     await deleteDoc(roomRef);
                 } else {
+                    // Non-host leaving
                     const roomDoc = await getDoc(roomRef);
-                    if (roomDoc.exists()) {
-                         await updateDoc(roomRef, { [`players.${auth.currentUser.uid}`]: deleteField() });
+                    if (roomDoc.exists()){
+                        await updateDoc(roomRef, { [`players.${auth.currentUser.uid}`]: deleteField() });
                     }
                 }
             } catch (error) { 
@@ -556,10 +495,9 @@
             }
         }
 
-        // --- 게임 시작 ---
         async function startGame() {
+            playSound('click');
             if (!currentRoomId || !localPlayer.isHost) return;
-            playSound('gameStart');
             const roomRef = doc(db, 'rooms', currentRoomId);
             try {
                 await runTransaction(db, async (transaction) => {
@@ -641,14 +579,17 @@
             }
         }
         
-        // --- UI 업데이트 ---
         function updateGameUI(room) {
             const { gameState } = room;
+            if (gameState.transitionMessage) {
+                showPhaseTransition(gameState.transitionMessage);
+                return;
+            }
+
             document.getElementById('night-overlay').classList.toggle('active', gameState.phase === 'NIGHT');
             const currentScreen = document.querySelector('.screen:not(.hidden)')?.id;
             let targetScreen = 'game-screen';
 
-            // 결과 팝업이 활성화 중이면 다른 UI 업데이트를 잠시 보류
             if (document.getElementById('result-popup').classList.contains('hidden') === false) {
                  return;
             }
@@ -680,7 +621,7 @@
         }
 
         function updatePlayerGameView(room) {
-            const { players, gameState, gameMode } = room;
+            const { players, gameState, gameMode, totalRounds, entangledPairs } = room;
             const me = players[localPlayer.id];
             if (!me) {
                 if(localPlayer.isHost) {
@@ -689,14 +630,14 @@
                 return;
             };
 
-            document.getElementById('hud-player-info').innerHTML = `<span class="font-bold text-2xl">${me.number}</span> ${me.nickname}`;
+            document.getElementById('hud-player-info').innerHTML = `<span class="font-bold text-lg sm:text-2xl">${me.number}</span> ${me.nickname}`;
             
             let subPhaseText = gameState.subPhase;
             if (gameState.subPhase === 'DISCUSSION') subPhaseText = '토론';
             else if (gameState.subPhase === 'VOTE') subPhaseText = '투표';
             else if (gameState.subPhase === 'ACTION') subPhaseText = '행동';
-            const phaseText = `${gameState.round}번째 ${gameState.phase === 'DAY' ? '낮' : '밤'} / ${subPhaseText}`;
-            document.getElementById('hud-phase').innerText = phaseText;
+            const phaseText = `<span class="text-sm sm:text-base">${gameState.round} / ${totalRounds || 4} 라운드</span><br>${gameState.phase === 'DAY' ? '낮' : '밤'} / ${subPhaseText}`;
+            document.getElementById('hud-phase').innerHTML = phaseText;
             
             let myRoleText = "시민";
             if (me.currentRole === 'AEON') myRoleText = "에이온";
@@ -719,7 +660,7 @@
                 const hasUsed = me.hasUsedCard;
 
                 myCardHtml = `
-                <div class="md:col-span-2 screen-panel p-4 ${hasUsed ? 'opacity-50' : ''}">
+                <div class="screen-panel p-4 ${hasUsed ? 'opacity-50' : ''}">
                     <h3 class="font-bold text-lg text-yellow-300 mb-2">내 능력 카드</h3>
                     <div class="bg-black/20 p-3 rounded-lg">
                         <p class="font-bold text-cyan-300 text-xl font-orbitron">${card.name} ${hasUsed ? '(사용 완료)' : ''}</p>
@@ -739,38 +680,41 @@
             }
 
             mainContentEl.innerHTML = `
-                <div id="player-board-${me.id}" class="md:col-span-2 screen-panel p-6 border-2 border-cyan-300/50">
+                <div id="player-board-${me.id}" class="screen-panel p-6 border-2 border-cyan-300/50">
                     <h2 class="title-text text-2xl font-bold text-center mb-4">나의 상태판</h2>
                     <div class="grid grid-cols-6 gap-2 max-w-sm mx-auto">
                         ${myChipsHtml}
                     </div>
                 </div>
                 ${myCardHtml}
-                <div class="md:col-span-2 screen-panel p-4">
+                <div class="screen-panel p-4">
                     <h3 class="font-bold mb-2">다른 플레이어</h3>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-                    ${otherPlayers.map(p => `
+                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                    ${otherPlayers.map(p => {
+                        const isEntangled = (entangledPairs || []).flat().includes(p.id);
+                        return `
                         <div class="p-2 rounded ${p.isAlive ? 'bg-black/20' : 'bg-black/40 opacity-50'}">
                             <span class="font-bold">${p.number}. ${p.nickname}</span>
+                            ${isEntangled ? '<span title="양자 얽힘 상태">🔗</span>' : ''}
                             ${p.isAlive ? '' : '<span class="text-red-500 text-sm">사망</span>'}
                         </div>
-                    `).join('')}
+                    `}).join('')}
                     </div>
                 </div>
             `;
         }
         
         function updateHostGameView(room) {
-            const { players, gameState, votes, nightActions } = room;
+            const { players, gameState, votes, nightActions, totalRounds, entangledPairs } = room;
             
-            document.getElementById('hud-player-info').innerHTML = `<span class="font-bold text-2xl">HOST</span> ${localPlayer.nickname}`;
+            document.getElementById('hud-player-info').innerHTML = `<span class="font-bold text-lg sm:text-2xl">HOST</span> ${localPlayer.nickname}`;
             
             let subPhaseText = gameState.subPhase;
             if (gameState.subPhase === 'DISCUSSION') subPhaseText = '토론';
             else if (gameState.subPhase === 'VOTE') subPhaseText = '투표';
             else if (gameState.subPhase === 'ACTION') subPhaseText = '행동';
-            const phaseText = `${gameState.round}번째 ${gameState.phase === 'DAY' ? '낮' : '밤'} / ${subPhaseText}`;
-            document.getElementById('hud-phase').innerText = phaseText;
+            const phaseText = `<span class="text-sm sm:text-base">${gameState.round} / ${totalRounds || 4} 라운드</span><br>${gameState.phase === 'DAY' ? '낮' : '밤'} / ${subPhaseText}`;
+            document.getElementById('hud-phase').innerHTML = phaseText;
             document.getElementById('hud-role').innerHTML = `<span>관전 모드</span>`;
             updateTimer(room);
 
@@ -782,7 +726,7 @@
                 
                 let actionStatus = '';
                 if (gameState.subPhase === 'VOTE') {
-                    actionStatus = votes[p.id] ? `<span class="text-green-400">투표완료</span>` : `<span class="text-gray-400">투표중</span>`;
+                    actionStatus = votes[p.id] ? `<span class="text-green-400" title="투표 완료">🗳️</span>` : `<span class="text-gray-400">투표중</span>`;
                 } else if (gameState.subPhase === 'ACTION') {
                     const isActionPlayer = p.currentRole !== 'CITIZEN';
                     if (isActionPlayer) {
@@ -812,10 +756,12 @@
                     cardInfoHtml = `<div class="text-xs text-yellow-400/70 truncate" title="${card.description}">${cardUsed}[${card.name}]${cardUsedEnd}</div>`;
                 }
 
+                const isEntangled = (entangledPairs || []).flat().includes(p.id);
+
                 return `
                     <div id="player-board-${p.id}" class="p-3 rounded-lg ${p.isAlive ? 'bg-black/20' : 'bg-black/40 opacity-50'}">
                         <div class="flex items-center justify-between">
-                            <span class="font-bold text-lg">${p.number}. ${p.nickname} [${p.currentRole.slice(0,1)}]</span>
+                            <span class="font-bold text-lg">${p.number}. ${p.nickname} ${isEntangled ? '🔗' : ''} [${p.currentRole.slice(0,1)}]</span>
                             <div class="flex items-center space-x-2">
                                 ${botControls}
                                 ${actionStatus}
@@ -829,18 +775,28 @@
             }).join('');
             
             const hostProceedBtn = document.getElementById('host-proceed-btn');
+            const hostSkipVoteBtn = document.getElementById('host-skip-vote-btn');
             const livingPlayers = Object.values(players).filter(p => p.isAlive);
             let allActed = false;
+            
+            if (gameState.subPhase === 'VOTE' || gameState.subPhase === 'ACTION') {
+                 if (isDevMode && localPlayer.isHost) {
+                    hostSkipVoteBtn.classList.remove('hidden');
+                }
+            } else {
+                 hostSkipVoteBtn.classList.add('hidden');
+            }
+            
             if (gameState.subPhase === 'VOTE') {
                 allActed = livingPlayers.length > 0 && livingPlayers.every(p => votes[p.id]);
             } else if (gameState.subPhase === 'ACTION') {
                 const actingPlayers = livingPlayers.filter(p => p.currentRole !== 'CITIZEN');
-                allActed = actingPlayers.every(p => nightActions[p.id]);
-                 if(actingPlayers.length === 0) allActed = true; // 행동할 플레이어가 없으면 바로 진행 가능
+                allActed = actingPlayers.length === 0 || actingPlayers.every(p => nightActions[p.id]);
             }
 
-            if ((gameState.subPhase === 'VOTE' || gameState.subPhase === 'ACTION') && allActed) {
+            if (allActed) {
                 hostProceedBtn.classList.remove('hidden');
+                 hostSkipVoteBtn.classList.add('hidden'); // 모두 행동했으면 스킵 버튼 숨김
             } else {
                 hostProceedBtn.classList.add('hidden');
             }
@@ -896,12 +852,33 @@
             }
         }
 
-        // --- 게임 진행 (핵심 로직) ---
         async function hostProceedPhase() {
             if (!currentRoomId || !localPlayer.isHost) return;
-            const roomRef = doc(db, "rooms", currentRoomId);
-            playSound('phaseChange');
             
+            const roomRef = doc(db, "rooms", currentRoomId);
+            const roomDocForPhase = await getDoc(roomRef);
+            if (!roomDocForPhase.exists()) return;
+            const currentSubPhase = roomDocForPhase.data().gameState.subPhase;
+
+            let transitionMessage = null;
+            if (currentSubPhase === 'DAY_RESULT') {
+                transitionMessage = "ENTERING NIGHT PROTOCOL...";
+            } else if (currentSubPhase === 'NIGHT_RESULT') {
+                transitionMessage = "SYSTEM REBOOTING FOR DAY CYCLE...";
+            }
+
+            if(transitionMessage) {
+                await updateDoc(roomRef, { 'gameState.transitionMessage': transitionMessage });
+                setTimeout(() => {
+                    runPhaseLogic(roomRef);
+                }, 3000); // 3초 후 실제 로직 실행
+            } else {
+                runPhaseLogic(roomRef);
+            }
+        }
+
+        async function runPhaseLogic(roomRef) {
+             playSound('phaseChange');
             try {
                 await runTransaction(db, async (transaction) => {
                     const roomDoc = await transaction.get(roomRef);
@@ -910,11 +887,11 @@
                     let room = roomDoc.data();
                     let { gameState, players, votes, nightActions, eventLog, cardActions } = room;
                     let newGameState = { ...gameState };
+                    delete newGameState.transitionMessage;
                     let newPlayers = JSON.parse(JSON.stringify(players));
                     let newLogEntries = [];
                     let newCardActionResults = {...room.cardActionResults};
 
-                    // DISCUSSION 카드는 DAY_DISCUSSION -> VOTE 로 넘어갈 때 처리
                     if (gameState.phase === 'DAY' && gameState.subPhase === 'DISCUSSION') {
                         if (room.gameMode === 'chaos' && cardActions && Object.keys(cardActions).length > 0) {
                             const effectResults = applyCardEffects(cardActions, newPlayers, newGameState, newLogEntries);
@@ -1031,9 +1008,9 @@
                                 let report = "밤 사이 활동 결과:<br>";
                                 let activity = false;
                                 if (results.successfulProtections.length > 0) { activity = true; report += results.successfulProtections.map(p => `🛡️ ${players[p.protectorId].nickname} 님이 ${players[p.targetId].nickname} 님을 보호했습니다.`).join('<br>'); }
-                                if (results.failedInfections.length > 0) { activity = true; report += '<br>' + results.failedInfections.map(f => `💥 ${players[f.attackerId].nickname} 님의 감염 시도가 ${players[f.protectorId].nickname} 님의 보호로 실패했습니다 (대상: ${players[f.targetId].nickname}).`).join('<br>');}
+                                if (results.failedInfections.length > 0) { activity = true; report += '<br>' + results.failedInfections.map(f => `💥 ${players[f.attackerId].nickname} 님의 감염 시도가 ${players[f.protectorId] ? players[f.protectorId].nickname + ' 님의 보호로' : '방화벽에 의해'} 실패했습니다 (대상: ${players[f.targetId].nickname}).`).join('<br>');}
                                 if (results.successfulInfections.length > 0) { activity = true; report += '<br>' + results.successfulInfections.map(i => `💀 ${players[i.attackerId].nickname} 님이 ${players[i.targetId].nickname} 님을 감염시켰습니다.`).join('<br>');}
-                                if(isFirewallActive && results.failedInfections.length > 0) { activity = true; report += '<br>🛡️ 방화벽에 의해 일부 감염이 막혔습니다.'; }
+                                if(isFirewallActive && results.failedInfections.length > 0 && !results.successfulProtections.length > 0) { activity = true; report += '<br>🛡️ 방화벽에 의해 모든 감염이 막혔습니다.'; }
                                 if (!activity) { report += "아무 일도 일어나지 않았습니다."; }
                                 traceUsers.forEach(userId => {
                                     newCardActionResults[userId] = { cardId: 'info_trace', details: report };
@@ -1076,11 +1053,12 @@
                             newLogEntries.push({ round: gameState.round, phase: '밤', hostText: `현재 에이온 수: ${finalAeonCount}명`, playerText: `현재 에이온 수: ${finalAeonCount}명`});
 
                             newGameState.round += 1;
-                            if (newGameState.round > 4) {
+                            if (newGameState.round > room.totalRounds) {
                                 newGameState.phase = 'END';
+                                // BUG FIX: 클래식 모드도 카오스 모드처럼 OBSERVATION 단계를 먼저 거치도록 수정
                                 newGameState.subPhase = 'OBSERVATION';
-                                newGameState.timer = 30;
-                                newGameState.message = "4라운드가 종료되었습니다. 최종 상태판을 확인하세요.";
+                                newGameState.timer = 30; 
+                                newGameState.message = "라운드가 종료되었습니다. 최종 상태판을 확인하세요.";
                             } else {
                                 newGameState.phase = 'DAY';
                                 newGameState.subPhase = 'DISCUSSION';
@@ -1168,7 +1146,7 @@
         function showResultPopup(room) {
             const { gameState, players } = room;
             const popup = document.getElementById('result-popup');
-            if (!popup.classList.contains('hidden')) return; // 이미 팝업이 떠있으면 중복 실행 방지
+            if (!popup.classList.contains('hidden')) return; 
 
             const iconEl = document.getElementById('result-icon');
             const textEl = document.getElementById('result-text');
@@ -1196,32 +1174,32 @@
                 textEl.innerText = resultMessage;
             } else if (gameState.subPhase === 'NIGHT_RESULT') {
                  iconEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-moon-star text-indigo-400 animate-pulse"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/><path d="M19 3v4"/><path d="M21 5h-4"/></svg>`;
-                textEl.innerText = "밤이 지나고 아침이 밝았습니다.";
-                timeoutDuration = 5000;
+                 textEl.innerText = "밤이 지나고 아침이 밝았습니다.";
+                 timeoutDuration = 5000;
                 
-                const { successfulInfections, successfulProtections, failedInfections } = gameState.lastNightResults;
-                let detailsHTML = '';
+                 const { successfulInfections, successfulProtections, failedInfections } = gameState.lastNightResults;
+                 let detailsHTML = '';
                 
-                if (localPlayer.isHost) {
-                    successfulProtections.forEach(p => {
-                        detailsHTML += `<div class="flex items-center justify-center text-green-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-shield-check mr-2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="m9 12 2 2 4-4"/></svg> ${players[p.protectorId].nickname} → ${players[p.targetId].nickname} 보호 성공.</div>`;
-                    });
-                    failedInfections.forEach(f => {
-                         detailsHTML += `<div class="flex items-center justify-center text-yellow-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-shield-off mr-2"><path d="M19.69 14a6.9 6.9 0 0 0-9.38-9.38"/><path d="M4 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><line x1="2" x2="22" y1="2" y2="22"/></svg> ${players[f.attackerId].nickname} → ${players[f.targetId].nickname} 감염 실패.</div>`;
-                    });
-                    successfulInfections.forEach(i => {
-                         detailsHTML += `<div class="flex items-center justify-center text-red-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-virus mr-2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="m8 8 1.41-1.41"/><path d="M14.59 9.41 16 8"/><path d="m8 16 1.41 1.41"/><path d="M14.59 14.59 16 16"/><path d="M12 8v8"/><path d="m9.41 14.59 1.41-1.41"/><path d="m16 14.59-1.41-1.41"/><path d="m9.41 9.41 1.41 1.41"/></svg> ${players[i.attackerId].nickname} → ${players[i.targetId].nickname} 감염 성공.</div>`;
-                    });
-                } else {
+                 if (localPlayer.isHost) {
+                     successfulProtections.forEach(p => {
+                         detailsHTML += `<div class="flex items-center justify-center text-green-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-shield-check mr-2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="m9 12 2 2 4-4"/></svg> ${players[p.protectorId].nickname} → ${players[p.targetId].nickname} 보호 성공.</div>`;
+                     });
+                     failedInfections.forEach(f => {
+                          detailsHTML += `<div class="flex items-center justify-center text-yellow-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-shield-off mr-2"><path d="M19.69 14a6.9 6.9 0 0 0-9.38-9.38"/><path d="M4 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><line x1="2" x2="22" y1="2" y2="22"/></svg> ${players[f.attackerId].nickname} → ${players[f.targetId].nickname} 감염 실패.</div>`;
+                     });
+                     successfulInfections.forEach(i => {
+                          detailsHTML += `<div class="flex items-center justify-center text-red-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-virus mr-2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="m8 8 1.41-1.41"/><path d="M14.59 9.41 16 8"/><path d="m8 16 1.41 1.41"/><path d="M14.59 14.59 16 16"/><path d="M12 8v8"/><path d="m9.41 14.59 1.41-1.41"/><path d="m16 14.59-1.41-1.41"/><path d="m9.41 9.41 1.41 1.41"/></svg> ${players[i.attackerId].nickname} → ${players[i.targetId].nickname} 감염 성공.</div>`;
+                     });
+                 } else {
                       if (successfulProtections.length > 0) detailsHTML += `<p class="text-green-400">누군가 백신으로 감염을 막았습니다.</p>`;
                       if (gameState.isFirewallActive) detailsHTML += `<p class="text-blue-400">방화벽이 모든 감염을 막았습니다.</p>`;
                       else if (successfulInfections.length > 0) detailsHTML += `<p class="text-red-400">밤 사이 누군가 감염되었습니다.</p>`;
-                }
+                 }
 
-                if (detailsHTML === '') {
-                    detailsHTML = '<p>아무 일도 일어나지 않았습니다.</p>';
-                }
-                detailsEl.innerHTML = detailsHTML;
+                 if (detailsHTML === '') {
+                     detailsHTML = '<p>아무 일도 일어나지 않았습니다.</p>';
+                 }
+                 detailsEl.innerHTML = detailsHTML;
             }
 
             popup.classList.remove('hidden');
@@ -1308,7 +1286,7 @@
             document.getElementById('vote-popup').classList.add('hidden');
         }
 
-        window.submitVote = async (targetIds) => {
+        async function submitVote(targetIds) {
             if (!currentRoomId || targetIds.length === 0) return;
             const roomRef = doc(db, 'rooms', currentRoomId);
             const actorId = actingBotId || localPlayer.id;
@@ -1316,7 +1294,7 @@
             hideActionPopup();
             actingBotId = null;
         }
-        window.submitNightAction = async (targetIds) => {
+        async function submitNightAction(targetIds) {
             if (!currentRoomId) return;
             if (!Array.isArray(targetIds)) targetIds = [targetIds];
             
@@ -1338,70 +1316,115 @@
 
         // --- 게임 종료 ---
         function updateObservationUI(room) {
-            const { players, gameState } = room;
-            const observationEl = document.getElementById('observation-player-list');
+            const { players, gameState, gameMode, cardActions } = room;
+            const observationTextEl = document.getElementById('observation-text');
             const hostControlsEl = document.getElementById('host-observation-controls');
+            const timerText = document.getElementById('observation-timer');
             hostControlsEl.classList.add('hidden');
-
+        
+            if (gameState.subPhase === 'OBSERVATION') {
+                observationTextEl.innerText = "모든 플레이어의 최종 상태판이 공개됩니다. 30초 후 호스트가 운명 측정을 시작합니다.";
+            } else if (gameState.subPhase === 'MEASUREMENT_READY') {
+                observationTextEl.innerText = "호스트가 각 플레이어의 운명을 측정합니다.";
+                timerText.innerText = "측정 대기 중...";
+            }
+            
+            const observationEl = document.getElementById('observation-player-list');
             observationEl.innerHTML = Object.values(players).sort((a,b)=>a.number - b.number).map(p => {
                 const chipsHtml = p.quantumState.map(chip => 
                     `<div class="w-full h-4 rounded ${chip === 'AEON' ? 'bg-red-500 neon-red-sm' : 'bg-blue-500 neon-blue-sm'}"></div>`
                 ).join('');
                 
-                const measureButton = localPlayer.isHost && !p.finalRole && p.isAlive && gameState.subPhase === 'MEASUREMENT_READY' ? `<button onclick="measurePlayer('${p.id}')" class="btn-primary text-sm py-1 px-3">측정하기</button>` : '';
-
+                const isMeasurable = localPlayer.isHost && !p.finalRole && p.isAlive && gameState.subPhase === 'MEASUREMENT_READY';
+                
                 let resultHtml = '';
                 if(p.finalRole) {
                     const roleText = p.finalRole === 'AEON' ? '에이온' : '시민 진영';
                     const colorClass = p.finalRole === 'AEON' ? 'text-red-400' : 'text-cyan-400';
                     resultHtml += `<span class="font-bold ${colorClass}">${roleText}</span>`;
+                } else if (isMeasurable) {
+                    resultHtml = `<span class="text-yellow-400 font-bold animate-pulse">측정하기</span>`;
                 }
 
-                if (p.id === localPlayer.id && p.finalRole && p.abilityCard === 'rule_remeasure' && !p.hasUsedCard) {
-                    resultHtml += `<button onclick="requestRemeasure()" class="ml-2 bg-yellow-500 text-black text-xs font-bold py-1 px-2 rounded">재측정</button>`;
+                if ((p.id === localPlayer.id || (isDevMode && localPlayer.isHost)) && p.finalRole && p.abilityCard === 'rule_remeasure' && !p.hasUsedCard) {
+                    resultHtml += `<button onclick="requestRemeasure('${p.id}')" class="ml-2 bg-yellow-500 text-black text-xs font-bold py-1 px-2 rounded">재측정</button>`;
                 }
 
-                return `<div class="screen-panel p-3">
+                const panelClass = isMeasurable ? 'cursor-pointer hover:border-yellow-400 transition-all' : '';
+                const onClickAction = isMeasurable ? `onclick="measurePlayer('${p.id}')"` : '';
+
+                return `<div class="screen-panel p-3 ${panelClass}" ${onClickAction}>
                             <div class="flex items-center justify-between">
                                 <span class="font-bold text-lg">${p.number}. ${p.nickname}</span>
-                                <div class="h-8 flex items-center justify-center">${measureButton}${resultHtml}</div>
+                                <div class="h-8 flex items-center justify-center">${resultHtml}</div>
                             </div>
                             <div class="grid grid-cols-6 gap-1 mt-2">${chipsHtml}</div>
                         </div>`;
             }).join('');
             
-            const timerText = document.getElementById('observation-timer');
+            
             if(gameTimerInterval) clearInterval(gameTimerInterval);
             let timer = gameState.timer;
 
-              const allMeasured = Object.values(players).filter(p => p.isAlive).every(p => p.finalRole);
-              if(allMeasured) {
-                   if(localPlayer.isHost) {
-                        timerText.innerText = "5초 후 결과를 공개합니다...";
-                        setTimeout(() => {
+            const allMeasured = Object.values(players).filter(p => p.isAlive).every(p => p.finalRole);
+            if(allMeasured) {
+                if(localPlayer.isHost) {
+                    timerText.innerText = "5초 후 결과를 공개합니다...";
+                    setTimeout(() => {
+                        const roomRef = doc(db, 'rooms', currentRoomId);
+                        updateDoc(roomRef, { 'gameState.subPhase': 'RESULT' });
+                    }, 5000);
+                }
+                return;
+            }
+            
+            if (gameState.subPhase === 'OBSERVATION') {
+                timerText.innerText = Math.max(0, timer);
+                if (timer > 0) { // Only set interval if timer is running
+                    gameTimerInterval = setInterval(() => {
+                        timer--;
+                        timerText.innerText = Math.max(0, timer);
+                        if (timer < 0) {
+                            clearInterval(gameTimerInterval);
+                            if (localPlayer.isHost) {
+                                // BUG FIX: 클래식 모드에서는 바로 측정 단계로 넘어가도록 수정
+                                if (gameMode === 'classic') {
+                                    const roomRef = doc(db, 'rooms', currentRoomId);
+                                    updateDoc(roomRef, { 'gameState.subPhase': 'MEASUREMENT_READY' });
+                                } else { // Chaos Mode
+                                    const hasCardsToPlay = cardActions && Object.values(cardActions).some(a => abilityCardDeck[a.cardId]?.timing === 'OBSERVATION');
+                                    if (!hasCardsToPlay) {
+                                        const roomRef = doc(db, 'rooms', currentRoomId);
+                                        updateDoc(roomRef, { 'gameState.subPhase': 'MEASUREMENT_READY' });
+                                    } else {
+                                        timerText.innerText = "카드 효과 처리 대기 중...";
+                                        hostControlsEl.classList.remove('hidden');
+                                    }
+                                }
+                            } else {
+                                timerText.innerText = "호스트 대기 중...";
+                            }
+                        }
+                    }, 1000);
+                } else { // Timer is already 0 or less when rendering
+                    if (localPlayer.isHost) {
+                        if (gameMode === 'classic') {
                             const roomRef = doc(db, 'rooms', currentRoomId);
-                            updateDoc(roomRef, { 'gameState.subPhase': 'RESULT' });
-                        }, 5000);
-                   }
-                   return;
-              }
-
-            timerText.innerText = Math.max(0, timer);
-            if(timer > 0 && gameState.subPhase === 'OBSERVATION') {
-                gameTimerInterval = setInterval(() => {
-                    timer--;
-                    timerText.innerText = Math.max(0, timer);
-                    if (timer < 0) {
-                        clearInterval(gameTimerInterval);
-                        timerText.innerText = "카드 효과 처리 대기 중...";
-                        if(localPlayer.isHost) hostControlsEl.classList.remove('hidden');
+                            updateDoc(roomRef, { 'gameState.subPhase': 'MEASUREMENT_READY' });
+                        } else {
+                            const hasCardsToPlay = cardActions && Object.values(cardActions).some(a => abilityCardDeck[a.cardId]?.timing === 'OBSERVATION');
+                            if (!hasCardsToPlay) {
+                                 const roomRef = doc(db, 'rooms', currentRoomId);
+                                 updateDoc(roomRef, { 'gameState.subPhase': 'MEASUREMENT_READY' });
+                            } else {
+                                timerText.innerText = "카드 효과 처리 대기 중...";
+                                hostControlsEl.classList.remove('hidden');
+                            }
+                        }
+                    } else {
+                        timerText.innerText = "호스트 대기 중...";
                     }
-                }, 1000);
-            } else if (gameState.subPhase === 'OBSERVATION') {
-                timerText.innerText = "카드 효과 처리 대기 중...";
-                if(localPlayer.isHost) hostControlsEl.classList.remove('hidden');
-            } else if (gameState.subPhase === 'MEASUREMENT_READY') {
-                timerText.innerText = "측정을 시작하세요.";
+                }
             }
         }
         
@@ -1410,72 +1433,73 @@
              const roomRef = doc(db, "rooms", currentRoomId);
              try {
                  await runTransaction(db, async (transaction) => {
-                    const roomDoc = await transaction.get(roomRef);
-                    if (!roomDoc.exists()) return;
-                    let room = roomDoc.data();
-                    let { players, cardActions } = room;
-                    let newPlayers = JSON.parse(JSON.stringify(players));
-                    let newLogEntries = [];
+                     const roomDoc = await transaction.get(roomRef);
+                     if (!roomDoc.exists()) return;
+                     let room = roomDoc.data();
+                     let { players, cardActions } = room;
+                     let newPlayers = JSON.parse(JSON.stringify(players));
+                     let newLogEntries = [];
 
-                    if (cardActions) {
+                     if (cardActions) {
                          for(const playerId in cardActions) {
-                            const action = cardActions[playerId];
-                            const card = abilityCardDeck[action.cardId];
-                            if (card.timing === 'OBSERVATION') {
-                                const user = newPlayers[playerId];
-                                const target = newPlayers[action.targetIds[0]];
-                                if (action.cardId === 'state_scramble' && user && target) {
-                                    const userState = [...user.quantumState];
-                                    newPlayers[playerId].quantumState = [...target.quantumState];
-                                    newPlayers[action.targetIds[0]].quantumState = userState;
-                                    newLogEntries.push({ round: '종료', phase: '관측', hostText: `${user.nickname}님이 [신분 교란 장치]를 사용했습니다.`, playerText: `[신분 교란 장치]가 발동하여 누군가의 상태판이 뒤바뀌었습니다.`});
-                                }
-                            }
-                        }
-                    }
-                    transaction.update(roomRef, {
-                        players: newPlayers,
-                        'gameState.subPhase': 'MEASUREMENT_READY',
-                        eventLog: arrayUnion(...newLogEntries)
-                    });
-                });
+                             const action = cardActions[playerId];
+                             const card = abilityCardDeck[action.cardId];
+                             if (card.timing === 'OBSERVATION') {
+                                 const user = newPlayers[playerId];
+                                 const target = newPlayers[action.targetIds[0]];
+                                 if (action.cardId === 'state_scramble' && user && target) {
+                                     const userState = [...user.quantumState];
+                                     newPlayers[playerId].quantumState = [...target.quantumState];
+                                     newPlayers[action.targetIds[0]].quantumState = userState;
+                                     newLogEntries.push({ round: '종료', phase: '관측', hostText: `${user.nickname}님이 [신분 교란 장치]를 사용했습니다.`, playerText: `[신분 교란 장치]가 발동하여 누군가의 상태판이 뒤바뀌었습니다.`});
+                                 }
+                             }
+                         }
+                     }
+                     transaction.update(roomRef, {
+                         players: newPlayers,
+                         'gameState.subPhase': 'MEASUREMENT_READY',
+                         eventLog: arrayUnion(...newLogEntries)
+                     });
+                 });
              } catch (e) {
-                console.error("Error applying observation cards:", e);
+                 console.error("Error applying observation cards:", e);
              }
         }
 
 
-        window.measurePlayer = async (playerId) => {
-           if (!localPlayer.isHost) return;
-           const roomRef = doc(db, 'rooms', currentRoomId);
-           const playerToMeasure = currentRoomData.players[playerId];
-           if (!playerToMeasure || playerToMeasure.finalRole) return;
-           
-           const state = playerToMeasure.quantumState;
-           const aeonStickers = state.filter(s => s === 'AEON').length;
-           const probability = aeonStickers / 6;
-           const isAeon = Math.random() < probability;
-           const finalRole = isAeon ? 'AEON' : 'CITIZEN';
+        async function measurePlayer(playerId) {
+          if (!localPlayer.isHost) return;
+          const roomRef = doc(db, 'rooms', currentRoomId);
+          const playerToMeasure = currentRoomData.players[playerId];
+          if (!playerToMeasure || playerToMeasure.finalRole) return;
+          
+          const state = playerToMeasure.quantumState;
+          const aeonStickers = state.filter(s => s === 'AEON').length;
+          const probability = aeonStickers / 6;
+          const isAeon = Math.random() < probability;
+          const finalRole = isAeon ? 'AEON' : 'CITIZEN';
 
-           await updateDoc(roomRef, { [`players.${playerId}.finalRole`]: finalRole });
+          await updateDoc(roomRef, { [`players.${playerId}.finalRole`]: finalRole });
         }
         
-        async function requestRemeasure() {
+        async function requestRemeasure(playerId) {
             if (!currentRoomId) return;
-            const me = currentRoomData.players[localPlayer.id];
+            const targetPlayerId = playerId || localPlayer.id;
+            const me = currentRoomData.players[targetPlayerId];
             if (me.abilityCard !== 'rule_remeasure' || me.hasUsedCard) return;
 
             const roomRef = doc(db, 'rooms', currentRoomId);
             await updateDoc(roomRef, {
-                [`players.${localPlayer.id}.finalRole`]: null,
-                [`players.${localPlayer.id}.hasUsedCard`]: true
+                [`players.${targetPlayerId}.finalRole`]: null,
+                [`players.${targetPlayerId}.hasUsedCard`]: true
             });
             showCustomAlert('재측정을 요청했습니다. 호스트가 다시 측정할 것입니다.');
         }
 
 
         function updateEndResultUI(room) {
-            const { players, gameState } = room;
+            const { players } = room;
             
             const finalPlayers = Object.values(players).filter(p => p.isAlive);
             const aeonCount = finalPlayers.filter(p => p.finalRole === 'AEON').length;
@@ -1483,7 +1507,7 @@
             const winTeam = aeonCount >= citizenCount ? 'AEON' : 'CITIZEN';
 
             const winnerList = [];
-            const entangledPairs = gameState.entangledPairs || [];
+            const entangledPairs = room.entangledPairs || [];
             const entangledPlayerIds = entangledPairs.flat();
             
             // 얽히지 않은 플레이어 승리 판정
@@ -1549,6 +1573,7 @@
                         nightActions: deleteField(),
                         cardActions: deleteField(),
                         cardActionResults: deleteField(),
+                        entangledPairs: deleteField(),
                         players: originalPlayers 
                     });
                 }
@@ -1558,10 +1583,10 @@
         }
 
         // --- 개발자 모드 전용 함수 ---
-        window.addBotPlayer = async () => {
+        function addBotPlayer() {
             if (!isDevMode || !localPlayer.isHost) return;
             const roomRef = doc(db, 'rooms', currentRoomId);
-            await runTransaction(db, async (transaction) => {
+            runTransaction(db, async (transaction) => {
                 const roomDoc = await transaction.get(roomRef);
                 if (!roomDoc.exists()) return;
                 const room = roomDoc.data();
@@ -1578,7 +1603,7 @@
             });
         };
 
-        window.hostControlBot = (botId, controlType) => {
+        function hostControlBot(botId, controlType) {
             if (!isDevMode || !localPlayer.isHost) return;
             actingBotId = botId; 
             const room = currentRoomData;
@@ -1603,7 +1628,7 @@
             }
         };
 
-        window.hostControlBotCard = (botId) => {
+        function hostControlBotCard(botId) {
             if (!isDevMode || !localPlayer.isHost) return;
             actingBotId = botId;
             const bot = currentRoomData.players[botId];
@@ -1623,6 +1648,7 @@
             playSound('popupOpen');
         }
         function hideCustomAlert() {
+            playSound('click');
             document.getElementById('custom-alert-popup').classList.add('hidden');
         }
 
@@ -1751,13 +1777,15 @@
             return card.timing === gameState.subPhase;
         }
 
-        window.handleCardClick = () => {
+        function handleCardClick() {
+            playSound('click');
             const me = currentRoomData.players[localPlayer.id];
             const card = abilityCardDeck[me.abilityCard];
             showCustomAlertWithHTML(`'${card.name}' 카드를 사용하시겠습니까? <br/><br/> <div class="flex justify-center gap-4"><button onclick="confirmUseCard(false)" class="btn-primary">예</button><button onclick="hideCustomAlert()" class="btn-secondary">아니요</button></div>`);
         }
 
-        window.confirmUseCard = (isBotAction = false) => {
+        function confirmUseCard(isBotAction = false) {
+            playSound('click');
             hideCustomAlert();
             const actorId = isBotAction ? actingBotId : localPlayer.id;
             if (!actorId) {
@@ -1804,7 +1832,166 @@
             if (actingBotId) actingBotId = null;
             showCustomAlert("카드 능력을 사용 예약했습니다.");
         }
+
+        function showRoleRevealPopup() {
+            const popup = document.getElementById('role-reveal-popup');
+            const nameEl = document.getElementById('role-reveal-name');
+            const roleEl = document.getElementById('role-reveal-text');
+            
+            let roleText = "알 수 없음";
+            if (myInitialRoleForReveal === 'AEON') roleText = "에이온";
+            else if (myInitialRoleForReveal === 'DEVELOPER') roleText = "백신 개발자";
+            else if (myInitialRoleForReveal === 'CITIZEN') roleText = "시민";
+
+            nameEl.innerText = localPlayer.nickname;
+            roleEl.innerText = roleText;
+            
+            popup.classList.remove('hidden');
+            playSound('roleReveal');
+
+            setTimeout(() => {
+                popup.classList.add('hidden');
+                showScreen('game-screen');
+                updateGameUI(currentRoomData);
+            }, 4000);
+        }
+
+        function showPhaseTransition(message) {
+            const overlay = document.getElementById('phase-transition-overlay');
+            const textEl = document.getElementById('phase-transition-text');
+            textEl.innerText = message;
+            overlay.classList.remove('hidden');
+            playSound('phaseChange');
+            setTimeout(() => {
+                overlay.classList.add('hidden');
+            }, 2800);
+        }
         
+        // --- 초기화 및 전역 할당 ---
+        window.onload = () => {
+            initializeSounds();
+            startStarfield(); 
+
+            // URL 파라미터로 개발자 모드 확인
+            const urlParams = new URLSearchParams(window.location.search);
+            isDevMode = urlParams.get('dev') === 'true';
+            if (isDevMode) {
+                console.warn("개발자 모드가 활성화되었습니다.");
+            }
+            
+            // Firebase 초기화
+            try {
+                let firebaseConfig;
+                if (typeof __firebase_config !== 'undefined') {
+                    firebaseConfig = JSON.parse(__firebase_config);
+                } else {
+                    console.warn("로컬 개발용 Firebase 임시 설정을 사용합니다. 배포 시에는 실제 설정으로 교체해야 합니다.");
+                    // 로컬 테스트를 위한 임시 Firebase 설정
+                    firebaseConfig = {
+                        apiKey: "AIzaSyCrgCH3e-lmd79bb-aU74QfZUfvI8_m0vI",
+                        authDomain: "aeon-game-726d8.firebaseapp.com",
+                        projectId: "aeon-game-726d8",
+                        storageBucket: "aeon-game-726d8.appspot.com",
+                        messagingSenderId: "1031494860943",
+                        appId: "1:1031494860943:web:ca3acac820e0e67a4830fa"
+                    };
+                }
+
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        localPlayer.id = user.uid;
+                    } else {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            try {
+                                await signInWithCustomToken(auth, __initial_auth_token);
+                            } catch (error) {
+                                console.error("Custom token sign-in failed, falling back to anonymous", error);
+                                await signInAnonymously(auth);
+                            }
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error("Firebase 초기화 실패:", error);
+                document.body.innerHTML = '<div style="color: white; text-align: center; padding: 50px; font-size: 1.2rem;">Firebase 초기화에 실패했습니다. 설정을 확인해주세요.</div>';
+                return;
+            }
+
+            // 이벤트 리스너 등록
+            document.getElementById('create-room-btn').addEventListener('click', () => { playSound('click'); showScreen('create-mode-selection-screen'); });
+            document.getElementById('join-room-btn').addEventListener('click', () => { playSound('click'); showScreen('join-mode-selection-screen'); });
+            document.getElementById('close-popup-btn').addEventListener('click', hideCreateRoomPopup);
+            document.getElementById('submit-create-room-btn').addEventListener('click', createRoom);
+            document.getElementById('nickname-submit-btn').addEventListener('click', setNicknameAndShowMain);
+            document.getElementById('ready-btn').addEventListener('click', toggleReady);
+            document.getElementById('start-game-btn').addEventListener('click', startGame);
+            document.getElementById('back-to-lobby-btn').addEventListener('click', () => { playSound('click'); backToLobby(); });
+            document.getElementById('back-to-main-menu-btn').addEventListener('click', () => {
+                playSound('click');
+                if (roomListUnsubscribe) roomListUnsubscribe();
+                showScreen('main-menu-screen');
+            });
+            document.getElementById('back-to-main-from-create-select').addEventListener('click', () => { playSound('click'); showScreen('main-menu-screen'); });
+            document.getElementById('back-to-main-from-join-select').addEventListener('click', () => { playSound('click'); showScreen('main-menu-screen'); });
+            document.getElementById('leave-room-btn-lobby').addEventListener('click', showConfirmLeavePopup);
+            document.getElementById('leave-room-btn-game').addEventListener('click', showConfirmLeavePopup);
+            document.getElementById('cancel-leave-btn').addEventListener('click', hideConfirmLeavePopup);
+            document.getElementById('confirm-leave-btn').addEventListener('click', () => { playSound('click'); leaveRoom(false); });
+            document.getElementById('host-proceed-btn').addEventListener('click', () => { playSound('click'); hostProceedPhase(); });
+            document.getElementById('host-skip-timer-btn').addEventListener('click', () => { playSound('click'); hostProceedPhase(); });
+            document.getElementById('host-apply-observation-cards-btn').addEventListener('click', () => { playSound('click'); hostApplyObservationCards(); });
+            document.getElementById('host-skip-vote-btn').addEventListener('click', () => { playSound('click'); hostProceedPhase(); });
+            document.getElementById('rulebook-btn-main').addEventListener('click', showRulebookPopup);
+            document.getElementById('rulebook-btn-game').addEventListener('click', showRulebookPopup);
+            document.getElementById('close-rulebook-btn').addEventListener('click', hideRulebookPopup);
+            document.getElementById('close-custom-alert-btn').addEventListener('click', hideCustomAlert);
+            document.getElementById('event-log-btn').addEventListener('click', showEventLogPopup);
+            document.getElementById('close-event-log-btn').addEventListener('click', hideEventLogPopup);
+            
+            showScreen('nickname-screen');
+        };
+        
+        window.selectCreateMode = (mode) => {
+            playSound('click');
+            selectedGameMode = mode;
+            showCreateRoomPopup();
+        };
+        window.selectJoinMode = (mode) => {
+            playSound('click');
+            showRoomList(mode);
+        };
+        window.joinRoom = joinRoom;
+        window.addBotPlayer = addBotPlayer;
+        window.hostControlBot = hostControlBot;
+        window.hostControlBotCard = hostControlBotCard;
+        window.measurePlayer = measurePlayer;
+        window.requestRemeasure = requestRemeasure;
+        window.handleCardClick = handleCardClick;
+        window.confirmUseCard = confirmUseCard;
+        window.submitCardAction = submitCardAction;
+        window.hideActionPopup = hideActionPopup;
+        window.submitVote = submitVote;
+        window.submitNightAction = submitNightAction;
+        window.hideCustomAlert = hideCustomAlert;
+        window.setTotalRounds = async (rounds) => {
+            playSound('click');
+            if (!currentRoomId || !localPlayer.isHost) return;
+            const roomRef = doc(db, 'rooms', currentRoomId);
+            try {
+                await updateDoc(roomRef, { totalRounds: rounds });
+            } catch (error) {
+                console.error("Error setting total rounds:", error);
+            }
+        };
+
+
     </script>
     <style>
         :root {
@@ -1836,8 +2023,13 @@
             backdrop-filter: blur(10px);
             border: 1px solid var(--primary-cyan);
             box-shadow: 0 0 20px rgba(34, 211, 238, 0.3), inset 0 0 15px rgba(34, 211, 238, 0.2);
-            padding: 2rem;
+            padding: 1rem;
             border-radius: 1rem;
+        }
+        @media (min-width: 640px) {
+            .screen-panel {
+                padding: 2rem;
+            }
         }
         .screen-panel-item {
             background-color: rgba(0,0,0,0.3);
@@ -1907,12 +2099,27 @@
         }
         @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
         @keyframes scale-in { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+        .glitch-line {
+            height: 2px;
+            width: 100%;
+            background-color: var(--primary-cyan);
+            animation: glitch 1.5s infinite;
+        }
+        @keyframes glitch {
+            0% { transform: scaleX(1); }
+            2% { transform: scaleX(0.2) translateX(-50%); }
+            4% { transform: scaleX(1) translateX(0); }
+            30% { transform: scaleX(1) translateX(0); }
+            32% { transform: scaleX(0.5) translateX(50%); }
+            34% { transform: scaleX(1) translateX(0); }
+            100% { transform: scaleX(1); }
+        }
     </style>
 </head>
 <body class="bg-gray-900">
     <canvas id="starfield-bg"></canvas>
     <div id="night-overlay"></div>
-    <div id="app-container" class="min-h-screen flex items-center justify-center p-4 relative">
+    <div id="app-container" class="min-h-screen flex items-center justify-center p-2 sm:p-4 relative">
         <div id="nickname-screen" class="screen w-full max-w-md">
             <div class="screen-panel">
                 <h1 class="title-text text-3xl font-bold text-center mb-2">에이전트 코드명</h1>
@@ -1922,18 +2129,19 @@
                     입력 완료
                 </button>
             </div>
+             <p class="text-center text-gray-600 mt-4 text-sm font-orbitron">aeon ver 1.18</p>
         </div>
         <div id="main-menu-screen" class="screen hidden w-full max-w-md">
             <div class="screen-panel text-center">
-                 <h1 class="title-text text-5xl font-bold text-center mb-8">QUANTUM MAFIA</h1>
+                 <h1 class="title-text text-4xl sm:text-5xl font-bold text-center mb-8">QUANTUM MAFIA</h1>
                  <div class="space-y-4">
-                      <button id="create-room-btn" class="w-full btn-primary text-2xl py-4">
-                          게임방 만들기
-                      </button>
-                      <button id="join-room-btn" class="w-full btn-secondary text-2xl py-4">
-                          게임방 참가
-                      </button>
-                      <button id="rulebook-btn-main" class="w-full btn-secondary text-xl py-3">게임 룰북</button>
+                       <button id="create-room-btn" class="w-full btn-primary text-xl sm:text-2xl py-3 sm:py-4">
+                           게임방 만들기
+                       </button>
+                       <button id="join-room-btn" class="w-full btn-secondary text-xl sm:text-2xl py-3 sm:py-4">
+                           게임방 참가
+                       </button>
+                       <button id="rulebook-btn-main" class="w-full btn-secondary text-lg sm:text-xl py-2 sm:py-3">게임 룰북</button>
                  </div>
             </div>
         </div>
@@ -1973,7 +2181,7 @@
                 <div id="room-list-container" class="space-y-3 max-h-[60vh] overflow-y-auto pr-2">
                 </div>
                  <button id="back-to-main-menu-btn" class="w-full mt-6 btn-secondary">
-                     뒤로가기
+                      뒤로가기
                  </button>
             </div>
         </div>
@@ -1982,9 +2190,9 @@
                 <button id="leave-room-btn-lobby" class="absolute top-4 left-4 text-gray-400 hover:text-white transition">
                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-log-out"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
                 </button>
-                <div class="flex justify-between items-center mb-6">
+                <div class="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
                     <div>
-                        <h2 class="title-text text-3xl font-bold">게임 로비</h2>
+                        <h2 class="title-text text-2xl md:text-3xl font-bold">게임 로비</h2>
                         <p id="lobby-player-count" class="text-gray-400">플레이어: 0/4/12</p>
                     </div>
                     <div id="host-info" class="flex items-center space-x-2 text-lg text-gray-300">
@@ -1992,14 +2200,27 @@
                     <div class="text-right">
                         <p class="text-gray-400">방 ID</p>
                         <div class="flex items-center">
-                            <span id="lobby-room-id" class="text-2xl font-bold text-yellow-400 tracking-widest">...</span>
+                            <span id="lobby-room-id" class="text-xl md:text-2xl font-bold text-yellow-400 tracking-widest">...</span>
                             <button onclick="navigator.clipboard.writeText(document.getElementById('lobby-room-id').innerText); showCustomAlert('방 ID가 복사되었습니다.')" class="ml-2 p-1 text-gray-400 hover:text-white">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-clipboard-copy"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
                             </button>
                         </div>
                     </div>
                 </div>
-                <div id="player-slots" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-8">
+                <div class="flex flex-col lg:flex-row justify-between items-start mb-8 gap-4">
+                    <div id="player-slots" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 flex-grow w-full">
+                    </div>
+                    <div id="game-settings" class="ml-0 lg:ml-8 w-full lg:w-auto flex-shrink-0">
+                          <div id="round-info" class="text-lg text-gray-300 mb-4 text-center lg:text-left"></div>
+                          <div id="round-selection-container" class="text-center hidden">
+                            <h3 class="text-lg font-bold text-cyan-300 mb-2">라운드 설정</h3>
+                            <div class="flex justify-center space-x-2">
+                                <button id="round-btn-4" onclick="setTotalRounds(4)" class="btn-secondary px-4 py-2">4</button>
+                                <button id="round-btn-5" onclick="setTotalRounds(5)" class="btn-secondary px-4 py-2">5</button>
+                                <button id="round-btn-6" onclick="setTotalRounds(6)" class="btn-secondary px-4 py-2">6</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="flex justify-center items-center">
                     <button id="ready-btn" class="hidden bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-4 px-10 rounded-2xl text-2xl transition-all duration-300 transform hover:scale-105">준비</button>
@@ -2007,26 +2228,27 @@
                 </div>
             </div>
         </div>
-        <div id="game-screen" class="screen hidden w-full h-screen p-4 flex flex-col">
-             <div id="hud" class="screen-panel flex justify-between items-center p-2">
-                <div id="hud-player-info" class="flex items-center space-x-2 text-cyan-400"></div>
-                <div id="hud-phase" class="text-2xl font-bold text-yellow-400 font-orbitron"></div>
-                <div class="flex items-center space-x-4">
-                    <div id="hud-role" class="flex items-center space-x-2 text-cyan-400"></div>
+        <div id="game-screen" class="screen hidden w-full h-full p-2 sm:p-4 flex flex-col">
+             <div id="hud" class="screen-panel flex flex-col sm:flex-row justify-between items-center p-2 gap-2 flex-shrink-0">
+                <div id="hud-player-info" class="flex items-center space-x-2 text-cyan-400 text-sm sm:text-base"></div>
+                <div id="hud-phase" class="text-lg sm:text-2xl font-bold text-yellow-400 font-orbitron text-center"></div>
+                <div class="flex items-center space-x-2 sm:space-x-4">
+                    <div id="hud-role" class="flex items-center space-x-2 text-cyan-400 text-sm sm:text-base"></div>
                     <button id="rulebook-btn-game" class="text-gray-400 hover:text-white transition">
                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-book-open-text"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/><path d="M6 8h2"/><path d="M6 12h2"/><path d="M16 8h2"/><path d="M16 12h2"/></svg>
                     </button>
                      <button id="leave-room-btn-game" class="text-gray-400 hover:text-white transition">
-                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-log-out"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+                          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-log-out"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
                      </button>
                 </div>
             </div>
-            <div id="game-main-content" class="flex-grow my-4 grid grid-cols-1 md:grid-cols-4 gap-4 content-start overflow-y-auto pr-2">
+            <div id="game-main-content" class="flex-grow my-2 sm:my-4 grid grid-cols-1 lg:grid-cols-2 gap-4 content-start overflow-y-auto pr-2">
             </div>
-            <div id="host-controls" class="w-full text-center py-2">
+            <div id="host-controls" class="w-full text-center py-2 flex-shrink-0 flex justify-center items-center gap-4">
                 <button id="host-proceed-btn" class="hidden bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-8 rounded-lg text-xl transition-all duration-300 transform hover:scale-105">다음 단계로 진행</button>
+                <button id="host-skip-vote-btn" class="hidden bg-yellow-600 hover:bg-yellow-500 text-black font-bold py-2 px-4 rounded-lg text-sm">투표/행동 강제 종료</button>
             </div>
-            <div id="timer" class="w-full">
+            <div id="timer" class="w-full flex-shrink-0">
                 <div class="flex justify-between items-center">
                     <div id="timer-text" class="text-center font-bold text-2xl mb-1">300</div>
                     <button id="host-skip-timer-btn" class="hidden bg-yellow-600 hover:bg-yellow-500 text-black font-bold py-1 px-3 rounded-lg text-sm">턴 종료</button>
@@ -2040,8 +2262,8 @@
              </button>
         </div>
         <div id="observation-screen" class="screen hidden w-full max-w-4xl text-center screen-panel">
-            <h1 class="title-text text-4xl font-bold mb-2">상태판 공개</h1>
-            <p class="text-xl mb-4">카드 사용 시간입니다. 30초 후 호스트가 효과를 적용합니다.</p>
+            <h1 class="title-text text-3xl sm:text-4xl font-bold mb-2">상태판 공개</h1>
+            <p id="observation-text" class="text-lg sm:text-xl mb-4">카드 사용 시간입니다. 30초 후 호스트가 효과를 적용합니다.</p>
             <p id="observation-timer" class="text-3xl font-bold text-yellow-400 mb-6">30</p>
             <div id="observation-player-list" class="grid grid-cols-2 md:grid-cols-4 gap-4">
             </div>
@@ -2050,13 +2272,13 @@
             </div>
         </div>
         <div id="end-result-screen" class="screen hidden w-full max-w-2xl text-center screen-panel">
-            <h1 id="end-title" class="title-text text-5xl font-bold mb-8"></h1>
+            <h1 id="end-title" class="title-text text-3xl sm:text-5xl font-bold mb-8"></h1>
             <div id="final-player-list" class="space-y-2 mb-8">
             </div>
             <button id="back-to-lobby-btn" class="btn-secondary">로비로 돌아가기 (15초)</button>
         </div>
 
-        <div id="create-room-popup" class="hidden absolute inset-0 bg-black/20 flex items-center justify-center z-50 popup-overlay">
+        <div id="create-room-popup" class="hidden absolute inset-0 bg-black/20 flex items-center justify-center z-50 popup-overlay p-4">
             <div class="screen-panel w-full max-w-md relative popup-panel">
                 <button id="close-popup-btn" class="absolute top-4 right-4 text-gray-400 hover:text-white">
                     <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -2071,21 +2293,21 @@
                 </button>
             </div>
         </div>
-        <div id="action-popup" class="hidden absolute inset-0 bg-black/20 flex items-center justify-center z-50 popup-overlay">
+        <div id="action-popup" class="hidden absolute inset-0 bg-black/20 flex items-center justify-center z-50 popup-overlay p-4">
             <div class="screen-panel w-full max-w-md text-center relative popup-panel">
                 <h2 class="title-text text-2xl font-bold mb-4"></h2>
                 <p class="text-lg mb-6"></p>
                 <div id="action-buttons" class="flex justify-center space-x-4"></div>
             </div>
         </div>
-        <div id="vote-popup" class="hidden absolute inset-0 bg-black/20 flex items-center justify-center z-50 popup-overlay">
+        <div id="vote-popup" class="hidden absolute inset-0 bg-black/20 flex items-center justify-center z-50 popup-overlay p-4">
              <div class="screen-panel w-full max-w-md popup-panel">
                 <h2 class="title-text text-2xl font-bold text-center mb-4"></h2>
                 <p class="text-center mb-6"></p>
                 <div id="vote-targets" class="space-y-2 max-h-[40vh] overflow-y-auto"></div>
             </div>
         </div>
-        <div id="confirm-leave-popup" class="hidden absolute inset-0 bg-black/20 flex items-center justify-center z-50 popup-overlay">
+        <div id="confirm-leave-popup" class="hidden absolute inset-0 bg-black/20 flex items-center justify-center z-50 popup-overlay p-4">
             <div class="screen-panel w-full max-w-md text-center popup-panel">
                 <h2 class="title-text text-2xl font-bold text-yellow-400 mb-4">방 나가기</h2>
                 <p class="text-lg mb-4">정말로 방을 나가시겠습니까?</p>
@@ -2096,7 +2318,7 @@
                 </div>
             </div>
         </div>
-         <div id="result-popup" class="hidden absolute inset-0 bg-black/20 flex items-center justify-center z-50 popup-overlay">
+         <div id="result-popup" class="hidden absolute inset-0 bg-black/20 flex items-center justify-center z-50 popup-overlay p-4">
             <div class="screen-panel w-full max-w-lg text-center popup-panel">
                 <div id="result-icon" class="mx-auto mb-4"></div>
                 <p id="result-text" class="text-2xl font-bold"></p>
@@ -2137,9 +2359,9 @@
                         <h3 class="font-bold text-2xl text-cyan-300 mb-2 font-orbitron">4. 역할의 변화</h3>
                         <p>게임 중 상태판의 모든 칩이 한 가지 색으로 통일되면 당신의 역할과 능력이 즉시 변경됩니다.</p>
                          <ul class="list-disc list-inside mt-2 space-y-1">
-                            <li><strong class="text-red-400">새로운 에이온:</strong> 상태판이 모두 <span class="text-red-400">빨간색</span>이 되면, '에이온'이 되어 감염 능력을 얻습니다.</li>
-                             <li><strong class="text-blue-400">새로운 개발자:</strong> 상태판이 모두 <span class="text-blue-400">파란색</span>이 되면, '백신 개발자'가 되어 보호 능력을 얻습니다.</li>
-                             <li><strong class="text-gray-400">능력 상실:</strong> 에이온/개발자였더라도 상태판에 다른 색 칩이 생기면 능력을 잃고 '시민'이 됩니다.</li>
+                             <li><strong class="text-red-400">새로운 에이온:</strong> 상태판이 모두 <span class="text-red-400">빨간색</span>이 되면, '에이온'이 되어 감염 능력을 얻습니다.</li>
+                              <li><strong class="text-blue-400">새로운 개발자:</strong> 상태판이 모두 <span class="text-blue-400">파란색</span>이 되면, '백신 개발자'가 되어 보호 능력을 얻습니다.</li>
+                              <li><strong class="text-gray-400">능력 상실:</strong> 에이온/개발자였더라도 상태판에 다른 색 칩이 생기면 능력을 잃고 '시민'이 됩니다.</li>
                          </ul>
                     </div>
                     <div>
@@ -2195,14 +2417,29 @@
         <div id="event-log-popup" class="hidden absolute inset-0 bg-black/60 flex items-center justify-center z-[100] p-4 popup-overlay">
             <div class="screen-panel w-full max-w-2xl h-[70vh] flex flex-col relative popup-panel">
                  <button id="close-event-log-btn" class="absolute top-4 right-4 text-gray-400 hover:text-white z-10">
-                     <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                  </button>
                 <h2 class="title-text text-3xl font-bold text-center mb-4 flex-shrink-0">사건 기록</h2>
                 <div id="event-log-content" class="flex-grow overflow-y-auto pr-4 text-lg space-y-3">
                 </div>
             </div>
         </div>
+
+         <!-- 역할 공개 팝업 -->
+        <div id="role-reveal-popup" class="hidden absolute inset-0 bg-black/80 flex items-center justify-center z-[102] popup-overlay">
+            <div id="role-reveal-card" class="screen-panel w-full max-w-sm text-center popup-panel border-2 border-yellow-300 shadow-2xl shadow-yellow-300/50">
+                <p class="text-yellow-300 text-sm font-bold tracking-widest">AGENT IDENTIFICATION</p>
+                <h2 id="role-reveal-name" class="title-text text-4xl font-bold my-4"></h2>
+                <div class="glitch-line"></div>
+                <p class="text-gray-400 mb-2">INITIALIZING ROLE...</p>
+                <p id="role-reveal-text" class="text-2xl font-bold text-white"></p>
+            </div>
+        </div>
+
+        <!-- 단계 전환 오버레이 -->
+        <div id="phase-transition-overlay" class="hidden absolute inset-0 bg-black/90 flex items-center justify-center z-[103] pointer-events-none">
+            <p id="phase-transition-text" class="title-text text-3xl animate-pulse-slow"></p>
+        </div>
     </div>
 </body>
 </html>
-
