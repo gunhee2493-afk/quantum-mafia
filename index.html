@@ -639,7 +639,7 @@
             const phaseText = `<span class="text-sm sm:text-base">${gameState.round} / ${totalRounds || 4} 라운드</span><br>${gameState.phase === 'DAY' ? '낮' : '밤'} / ${subPhaseText}`;
             document.getElementById('hud-phase').innerHTML = phaseText;
             
-            let myRoleText = "시민";
+            let myRoleText = "과학자";
             if (me.currentRole === 'AEON') myRoleText = "에이온";
             if (me.currentRole === 'DEVELOPER') myRoleText = "백신 개발자";
             document.getElementById('hud-role').innerHTML = `<span>${myRoleText}</span>`;
@@ -1124,18 +1124,27 @@
                     } else if (me.currentRole === 'CITIZEN') {
                         submitNightAction([]); // 시민은 행동 없이 바로 완료 처리
                     } else {
+                        // *** BUG FIX START: 개발자가 자신을 보호할 수 있도록 로직 수정 ***
                         let maxTargets = 1;
-                        let title = me.currentRole === 'AEON' ? "감염 활동" : "보호 활동";
-                        let desc = me.currentRole === 'AEON' ? "감염시킬 플레이어를 선택하세요." : "감염으로부터 보호할 플레이어를 선택하세요.";
+                        let title, desc, actionTargets;
 
-                        if (me.currentRole === 'AEON' && me.abilityCard === 'state_fission' && !me.hasUsedCard) {
-                            maxTargets = 2;
-                            title = "[분열 변종] 감염 활동";
-                            desc = "감염시킬 플레이어 2명을 선택하세요.";
+                        if (me.currentRole === 'DEVELOPER') {
+                            title = "보호 활동";
+                            desc = "감염으로부터 보호할 플레이어를 선택하세요. (자신 포함)";
+                            actionTargets = Object.values(players).filter(p => p.isAlive); // 자신을 포함
+                        } else { // AEON
+                            title = "감염 활동";
+                            desc = "감염시킬 플레이어를 선택하세요.";
+                            actionTargets = Object.values(players).filter(p => p.isAlive && p.id !== me.id); // 자신을 제외
+
+                            if (me.abilityCard === 'state_fission' && !me.hasUsedCard) {
+                                maxTargets = 2;
+                                title = "[분열 변종] 감염 활동";
+                                desc = "감염시킬 플레이어 2명을 선택하세요.";
+                            }
                         }
-                        
-                        const actionTargets = Object.values(players).filter(p => p.isAlive && p.id !== me.id);
                         showVotePopup(title, desc, actionTargets, 'submitNightAction', maxTargets);
+                        // *** BUG FIX END ***
                     }
                 }
             } else if (gameState.phase === 'END' && ['OBSERVATION', 'MEASUREMENT', 'MEASUREMENT_READY'].includes(subPhase)) {
@@ -1176,28 +1185,28 @@
                  iconEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-moon-star text-indigo-400 animate-pulse"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/><path d="M19 3v4"/><path d="M21 5h-4"/></svg>`;
                  textEl.innerText = "밤이 지나고 아침이 밝았습니다.";
                  timeoutDuration = 5000;
-                
+                 
                  const { successfulInfections, successfulProtections, failedInfections } = gameState.lastNightResults;
                  let detailsHTML = '';
-                
+                 
                  if (localPlayer.isHost) {
-                     successfulProtections.forEach(p => {
-                         detailsHTML += `<div class="flex items-center justify-center text-green-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-shield-check mr-2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="m9 12 2 2 4-4"/></svg> ${players[p.protectorId].nickname} → ${players[p.targetId].nickname} 보호 성공.</div>`;
-                     });
-                     failedInfections.forEach(f => {
-                          detailsHTML += `<div class="flex items-center justify-center text-yellow-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-shield-off mr-2"><path d="M19.69 14a6.9 6.9 0 0 0-9.38-9.38"/><path d="M4 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><line x1="2" x2="22" y1="2" y2="22"/></svg> ${players[f.attackerId].nickname} → ${players[f.targetId].nickname} 감염 실패.</div>`;
-                     });
-                     successfulInfections.forEach(i => {
-                          detailsHTML += `<div class="flex items-center justify-center text-red-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-virus mr-2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="m8 8 1.41-1.41"/><path d="M14.59 9.41 16 8"/><path d="m8 16 1.41 1.41"/><path d="M14.59 14.59 16 16"/><path d="M12 8v8"/><path d="m9.41 14.59 1.41-1.41"/><path d="m16 14.59-1.41-1.41"/><path d="m9.41 9.41 1.41 1.41"/></svg> ${players[i.attackerId].nickname} → ${players[i.targetId].nickname} 감염 성공.</div>`;
-                     });
+                      successfulProtections.forEach(p => {
+                           detailsHTML += `<div class="flex items-center justify-center text-green-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-shield-check mr-2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="m9 12 2 2 4-4"/></svg> ${players[p.protectorId].nickname} → ${players[p.targetId].nickname} 보호 성공.</div>`;
+                      });
+                      failedInfections.forEach(f => {
+                           detailsHTML += `<div class="flex items-center justify-center text-yellow-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-shield-off mr-2"><path d="M19.69 14a6.9 6.9 0 0 0-9.38-9.38"/><path d="M4 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><line x1="2" x2="22" y1="2" y2="22"/></svg> ${players[f.attackerId].nickname} → ${players[f.targetId].nickname} 감염 실패.</div>`;
+                      });
+                      successfulInfections.forEach(i => {
+                           detailsHTML += `<div class="flex items-center justify-center text-red-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-virus mr-2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="m8 8 1.41-1.41"/><path d="M14.59 9.41 16 8"/><path d="m8 16 1.41 1.41"/><path d="M14.59 14.59 16 16"/><path d="M12 8v8"/><path d="m9.41 14.59 1.41-1.41"/><path d="m16 14.59-1.41-1.41"/><path d="m9.41 9.41 1.41 1.41"/></svg> ${players[i.attackerId].nickname} → ${players[i.targetId].nickname} 감염 성공.</div>`;
+                      });
                  } else {
-                      if (successfulProtections.length > 0) detailsHTML += `<p class="text-green-400">누군가 백신으로 감염을 막았습니다.</p>`;
-                      if (gameState.isFirewallActive) detailsHTML += `<p class="text-blue-400">방화벽이 모든 감염을 막았습니다.</p>`;
-                      else if (successfulInfections.length > 0) detailsHTML += `<p class="text-red-400">밤 사이 누군가 감염되었습니다.</p>`;
+                       if (successfulProtections.length > 0) detailsHTML += `<p class="text-green-400">누군가 백신으로 감염을 막았습니다.</p>`;
+                       if (gameState.isFirewallActive) detailsHTML += `<p class="text-blue-400">방화벽이 모든 감염을 막았습니다.</p>`;
+                       else if (successfulInfections.length > 0) detailsHTML += `<p class="text-red-400">밤 사이 누군가 감염되었습니다.</p>`;
                  }
 
                  if (detailsHTML === '') {
-                     detailsHTML = '<p>아무 일도 일어나지 않았습니다.</p>';
+                      detailsHTML = '<p>아무 일도 일어나지 않았습니다.</p>';
                  }
                  detailsEl.innerHTML = detailsHTML;
             }
@@ -1339,7 +1348,7 @@
                 
                 let resultHtml = '';
                 if(p.finalRole) {
-                    const roleText = p.finalRole === 'AEON' ? '에이온' : '시민 진영';
+                    const roleText = p.finalRole === 'AEON' ? '에이온' : '인류 진영';
                     const colorClass = p.finalRole === 'AEON' ? 'text-red-400' : 'text-cyan-400';
                     resultHtml += `<span class="font-bold ${colorClass}">${roleText}</span>`;
                 } else if (isMeasurable) {
@@ -1433,34 +1442,34 @@
              const roomRef = doc(db, "rooms", currentRoomId);
              try {
                  await runTransaction(db, async (transaction) => {
-                     const roomDoc = await transaction.get(roomRef);
-                     if (!roomDoc.exists()) return;
-                     let room = roomDoc.data();
-                     let { players, cardActions } = room;
-                     let newPlayers = JSON.parse(JSON.stringify(players));
-                     let newLogEntries = [];
+                      const roomDoc = await transaction.get(roomRef);
+                      if (!roomDoc.exists()) return;
+                      let room = roomDoc.data();
+                      let { players, cardActions } = room;
+                      let newPlayers = JSON.parse(JSON.stringify(players));
+                      let newLogEntries = [];
 
-                     if (cardActions) {
-                         for(const playerId in cardActions) {
-                             const action = cardActions[playerId];
-                             const card = abilityCardDeck[action.cardId];
-                             if (card.timing === 'OBSERVATION') {
-                                 const user = newPlayers[playerId];
-                                 const target = newPlayers[action.targetIds[0]];
-                                 if (action.cardId === 'state_scramble' && user && target) {
-                                     const userState = [...user.quantumState];
-                                     newPlayers[playerId].quantumState = [...target.quantumState];
-                                     newPlayers[action.targetIds[0]].quantumState = userState;
-                                     newLogEntries.push({ round: '종료', phase: '관측', hostText: `${user.nickname}님이 [신분 교란 장치]를 사용했습니다.`, playerText: `[신분 교란 장치]가 발동하여 누군가의 상태판이 뒤바뀌었습니다.`});
-                                 }
-                             }
-                         }
-                     }
-                     transaction.update(roomRef, {
-                         players: newPlayers,
-                         'gameState.subPhase': 'MEASUREMENT_READY',
-                         eventLog: arrayUnion(...newLogEntries)
-                     });
+                      if (cardActions) {
+                          for(const playerId in cardActions) {
+                               const action = cardActions[playerId];
+                               const card = abilityCardDeck[action.cardId];
+                               if (card.timing === 'OBSERVATION') {
+                                   const user = newPlayers[playerId];
+                                   const target = newPlayers[action.targetIds[0]];
+                                   if (action.cardId === 'state_scramble' && user && target) {
+                                       const userState = [...user.quantumState];
+                                       newPlayers[playerId].quantumState = [...target.quantumState];
+                                       newPlayers[action.targetIds[0]].quantumState = userState;
+                                       newLogEntries.push({ round: '종료', phase: '관측', hostText: `${user.nickname}님이 [신분 교란 장치]를 사용했습니다.`, playerText: `[신분 교란 장치]가 발동하여 누군가의 상태판이 뒤바뀌었습니다.`});
+                                   }
+                               }
+                          }
+                      }
+                      transaction.update(roomRef, {
+                          players: newPlayers,
+                          'gameState.subPhase': 'MEASUREMENT_READY',
+                          eventLog: arrayUnion(...newLogEntries)
+                      });
                  });
              } catch (e) {
                  console.error("Error applying observation cards:", e);
@@ -1503,7 +1512,7 @@
             
             const finalPlayers = Object.values(players).filter(p => p.isAlive);
             const aeonCount = finalPlayers.filter(p => p.finalRole === 'AEON').length;
-            const citizenCount = finalPlayers.filter(p => p.finalRole === 'CITIZEN').length;
+            const citizenCount = finalPlayers.filter(p => p.finalRole !== 'AEON').length;
             const winTeam = aeonCount >= citizenCount ? 'AEON' : 'CITIZEN';
 
             const winnerList = [];
@@ -1529,17 +1538,17 @@
                 }
             });
 
-            document.getElementById('end-title').innerText = winTeam === 'CITIZEN' ? '지구를 에이온으로부터 지켜냈습니다!' : '에이온이 지구를 점령하였습니다!';
+            document.getElementById('end-title').innerText = winTeam === 'CITIZEN' ? '인류의 과학을 지켜냈습니다!' : '에이온이 과학 발전을 저지했습니다!';
             
             const resultsEl = document.getElementById('final-player-list');
             resultsEl.innerHTML = `
                 <h3 class="text-xl font-bold mb-4">승리한 플레이어</h3>
-                ${winnerList.map(p => `<div class="text-lg">${p.number}. ${p.nickname} (${p.finalRole === 'AEON' ? '에이온' : '시민 진영'})</div>`).join('') || '승리한 플레이어가 없습니다.'}
+                ${winnerList.map(p => `<div class="text-lg">${p.number}. ${p.nickname} (${p.finalRole === 'AEON' ? '에이온' : '인류 진영'})</div>`).join('') || '승리한 플레이어가 없습니다.'}
             `;
             
             if(localPlayer.isHost) {
                  setTimeout(() => {
-                     backToLobby();
+                      backToLobby();
                  }, 15000);
             }
         }
@@ -1841,7 +1850,7 @@
             let roleText = "알 수 없음";
             if (myInitialRoleForReveal === 'AEON') roleText = "에이온";
             else if (myInitialRoleForReveal === 'DEVELOPER') roleText = "백신 개발자";
-            else if (myInitialRoleForReveal === 'CITIZEN') roleText = "시민";
+            else if (myInitialRoleForReveal === 'CITIZEN') roleText = "과학자";
 
             nameEl.innerText = localPlayer.nickname;
             roleEl.innerText = roleText;
@@ -2134,13 +2143,13 @@
             <div class="screen-panel text-center">
                  <h1 class="title-text text-4xl sm:text-5xl font-bold text-center mb-8">QUANTUM MAFIA</h1>
                  <div class="space-y-4">
-                       <button id="create-room-btn" class="w-full btn-primary text-xl sm:text-2xl py-3 sm:py-4">
+                      <button id="create-room-btn" class="w-full btn-primary text-xl sm:text-2xl py-3 sm:py-4">
                            게임방 만들기
-                       </button>
-                       <button id="join-room-btn" class="w-full btn-secondary text-xl sm:text-2xl py-3 sm:py-4">
+                      </button>
+                      <button id="join-room-btn" class="w-full btn-secondary text-xl sm:text-2xl py-3 sm:py-4">
                            게임방 참가
-                       </button>
-                       <button id="rulebook-btn-main" class="w-full btn-secondary text-lg sm:text-xl py-2 sm:py-3">게임 룰북</button>
+                      </button>
+                      <button id="rulebook-btn-main" class="w-full btn-secondary text-lg sm:text-xl py-2 sm:py-3">게임 룰북</button>
                  </div>
             </div>
         </div>
@@ -2210,8 +2219,8 @@
                     <div id="player-slots" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 flex-grow w-full">
                     </div>
                     <div id="game-settings" class="ml-0 lg:ml-8 w-full lg:w-auto flex-shrink-0">
-                          <div id="round-info" class="text-lg text-gray-300 mb-4 text-center lg:text-left"></div>
-                          <div id="round-selection-container" class="text-center hidden">
+                         <div id="round-info" class="text-lg text-gray-300 mb-4 text-center lg:text-left"></div>
+                         <div id="round-selection-container" class="text-center hidden">
                             <h3 class="text-lg font-bold text-cyan-300 mb-2">라운드 설정</h3>
                             <div class="flex justify-center space-x-2">
                                 <button id="round-btn-4" onclick="setTotalRounds(4)" class="btn-secondary px-4 py-2">4</button>
@@ -2237,7 +2246,7 @@
                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-book-open-text"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/><path d="M6 8h2"/><path d="M6 12h2"/><path d="M16 8h2"/><path d="M16 12h2"/></svg>
                     </button>
                      <button id="leave-room-btn-game" class="text-gray-400 hover:text-white transition">
-                          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-log-out"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-log-out"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
                      </button>
                 </div>
             </div>
@@ -2332,26 +2341,31 @@
                 <h2 class="title-text text-3xl font-bold text-center mb-4 flex-shrink-0">게임 룰북</h2>
                 <div id="rulebook-content" class="flex-grow overflow-y-auto pr-4 text-lg space-y-6 text-left">
                     <div>
+                        <h3 class="font-bold text-2xl text-cyan-300 mb-2 font-orbitron">0. 배경 이야기</h3>
+                        <p>때는 1927년, 벨기에 브뤼셀에서 열린 제5차 솔베이 회의. 아인슈타인, 닐스 보어, 마리 퀴리 등 세계 최고의 석학들이 모여 양자역학의 미래를 논하는 역사적인 순간, 인류의 비약적인 과학 발전을 저지하려는 외계 지성체 '에이온'이 당신들 사이에 몰래 스파이를 잠입시켰습니다.</p>
+                    </div>
+                    <div>
                         <h3 class="font-bold text-2xl text-cyan-300 mb-2 font-orbitron">1. 게임 목표 및 승리 조건</h3>
-                        <p>4라운드 종료 후, 살아남은 플레이어들의 최종 진영을 확인하여 수가 더 많은 진영이 승리합니다.</p>
+                        <p>설정된 라운드(4~6)가 모두 종료되면, 살아남은 과학자들의 최종 신원을 '측정'하여 인류 진영과 에이온 진영의 수를 비교하고, 수가 더 많은 진영이 승리합니다.</p>
                         <ul class="list-disc list-inside mt-2 space-y-1">
-                            <li><strong>무승부 규칙:</strong> 만약 최종 생존자의 시민 진영과 에이온 진영 수가 같다면, 인류를 지키지 못한 것으로 간주하여 <strong class="text-red-400">에이온 진영의 승리</strong>가 됩니다.</li>
-                         </ul>
+                            <li><strong>최종 측정(Measurement)이란?</strong>: 게임이 끝나면 각자의 '양자 상태판'은 여러 가능성이 중첩된 하나의 확률로 존재합니다. '측정'은 이 불확실한 상태를 관측하여 하나의 결과(인류 과학자 또는 에이온 스파이)로 확정하는 과정입니다. 상태판의 붉은 칩(에이온) 비율이 높을수록 측정 시 에이온으로 밝혀질 확률이 높아집니다.</li>
+                            <li><strong>무승부 규칙:</strong> 만약 최종 생존자의 인류 진영과 에이온 진영 수가 같다면, 인류의 과학 발전을 막으려는 에이온의 목적이 일부 달성된 것으로 간주하여 <strong class="text-red-400">에이온 진영의 승리</strong>가 됩니다.</li>
+                        </ul>
                     </div>
                     <div>
                         <h3 class="font-bold text-2xl text-cyan-300 mb-2 font-orbitron">2. 양자 상태판</h3>
                         <p>모든 플레이어는 6개의 칩으로 당신의 정체성을 나타내는 '양자 상태판'을 가집니다. 이 칩의 비율이 당신의 최종 정체가 될 확률입니다.</p>
                         <div class="flex items-center space-x-4 mt-2">
-                            <div class="flex items-center space-x-2"><div class="w-5 h-5 rounded bg-blue-500 neon-blue-sm"></div><span>시민 (CITIZEN)</span></div>
+                            <div class="flex items-center space-x-2"><div class="w-5 h-5 rounded bg-blue-500 neon-blue-sm"></div><span>인류 (CITIZEN)</span></div>
                             <div class="flex items-center space-x-2"><div class="w-5 h-5 rounded bg-red-500 neon-red-sm"></div><span>에이온 (AEON)</span></div>
                         </div>
                     </div>
                     <div>
                         <h3 class="font-bold text-2xl text-cyan-300 mb-2 font-orbitron">3. 역할 소개</h3>
                         <div class="space-y-3">
-                            <p><strong class="text-orange-400">시민 (Citizen):</strong> 특별한 능력이 없습니다. 추리를 통해 에이온을 색출하고 인류를 지켜야 합니다.</p>
-                            <p><strong class="text-orange-400">백신 개발자 (Developer):</strong> 초기 상태가 모두 '시민'입니다. 밤에 한 명을 지목해 '감염'을 막는 백신을 투여합니다. 자기 자신에게도 투여할 수 있습니다.</p>
-                            <p><strong class="text-orange-400">에이온 (AEON):</strong> 초기 상태가 모두 '에이온'입니다. 밤에 한 명을 지목해 '감염'시켜 시민 칩을 에이온 칩으로 바꿉니다.</p>
+                            <p><strong class="text-orange-400">과학자 (Scientist):</strong> 당신은 역사를 바꿀 위대한 지성입니다. 특별한 능력은 없지만, 날카로운 논리와 추리로 동료들 사이에 숨어든 에이온 스파이를 색출하고 인류 과학의 미래를 지켜내야 합니다.</p>
+                            <p><strong class="text-orange-400">백신 개발자 (Developer):</strong> 당신은 에이온의 정신 감염에 저항할 '인지 백신'을 개발한 선구자입니다. 밤마다 동료 한 명에게 백신을 투여하여 에이온의 감염으로부터 보호할 수 있습니다. (자신에게도 투여 가능)</p>
+                            <p><strong class="text-orange-400">에이온 (AEON):</strong> 당신은 과학자로 위장한 외계 스파이입니다. 밤마다 인류 과학자 한 명의 정신을 '감염'시켜, 그의 상태판을 오염시키고 인류 진영을 당신의 편으로 만들어야 합니다.</p>
                         </div>
                     </div>
                      <div>
@@ -2360,19 +2374,19 @@
                          <ul class="list-disc list-inside mt-2 space-y-1">
                              <li><strong class="text-red-400">새로운 에이온:</strong> 상태판이 모두 <span class="text-red-400">빨간색</span>이 되면, '에이온'이 되어 감염 능력을 얻습니다.</li>
                               <li><strong class="text-blue-400">새로운 개발자:</strong> 상태판이 모두 <span class="text-blue-400">파란색</span>이 되면, '백신 개발자'가 되어 보호 능력을 얻습니다.</li>
-                              <li><strong class="text-gray-400">능력 상실:</strong> 에이온/개발자였더라도 상태판에 다른 색 칩이 생기면 능력을 잃고 '시민'이 됩니다.</li>
+                              <li><strong class="text-gray-400">능력 상실:</strong> 에이온/개발자였더라도 상태판에 다른 색 칩이 생기면 능력을 잃고 일반 '과학자'가 됩니다.</li>
                          </ul>
                     </div>
                     <div>
                         <h3 class="font-bold text-2xl text-cyan-300 mb-2 font-orbitron">5. 게임 진행: 낮과 밤</h3>
                         <div class="space-y-4">
                             <div>
-                                <h4 class="font-bold text-xl text-yellow-300 mb-1">🌞 낮: 치료제 투여</h4>
-                                <p>5분간 토론 후, 모든 생존자는 <strong class="text-yellow-300">'치료제'</strong>를 투여할 1명을 투표합니다. 치료제는 이미 감염된 <span class="text-red-400">에이온 칩</span> 1개를 <span class="text-blue-400">시민 칩</span>으로 되돌립니다. 동점 시 1명이 뽑힐 때까지 재투표합니다.</p>
+                                <h4 class="font-bold text-xl text-yellow-300 mb-1">🌞 낮: 인지 치료</h4>
+                                <p>5분간 토론 후, 모든 생존자는 <strong class="text-yellow-300">'인지 치료제'</strong>를 투여할 1명을 투표합니다. 치료제는 감염된 <span class="text-red-400">에이온 칩</span> 1개를 <span class="text-blue-400">인류 칩</span>으로 되돌립니다. 동점 시 1명이 뽑힐 때까지 재투표합니다.</p>
                             </div>
                             <div>
-                                <h4 class="font-bold text-xl text-indigo-300 mb-1">🌚 밤: 능력 사용</h4>
-                                <p>에이온은 <strong class="text-indigo-300">'감염'</strong> 대상을, 개발자는 <strong class="text-indigo-300">'백신'</strong> 투여 대상을 선택합니다.</p>
+                                <h4 class="font-bold text-xl text-indigo-300 mb-1">🌚 밤: 비밀 활동</h4>
+                                <p>에이온은 <strong class="text-indigo-300">'정신 감염'</strong> 대상을, 개발자는 <strong class="text-indigo-300">'인지 백신'</strong> 투여 대상을 선택합니다.</p>
                                 <ul class="list-disc list-inside mt-2 space-y-2 pl-2">
                                     <li><strong class="text-red-400">감염:</strong> 대상의 <span class="text-blue-400">파란 칩</span> 1개가 <span class="text-red-400">빨간 칩</span>으로 바뀝니다.</li>
                                     <li><strong class="text-blue-400">백신:</strong> 그 턴에 대상에게 가해지는 <strong class="text-red-400">모든 감염 시도</strong>를 무효화합니다.</li>
