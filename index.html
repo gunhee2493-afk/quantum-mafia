@@ -30,13 +30,13 @@
 
         // --- 카드 정의 ---
         const abilityCardDeck = {
-            'info_read': { name: '기밀 정보 열람', description: '낮 토론 시간에 다른 플레이어 1명의 상태판 전체를 자신만 확인합니다.', timing: 'DISCUSSION', type: 'info', needsTarget: true },
             'info_trace': { name: '암호 해독기', description: '낮 토론 종료 직전 사용하여, 다가오는 밤의 모든 능력 사용 결과를 혼자만 확인합니다.', timing: 'DISCUSSION', type: 'info', needsTarget: false },
+            'info_heisenberg': { name: '하이젠베르크 관측기', description: '다른 플레이어 1명의 상태판을 정확하게 확인하는 대가(불확정성 원리)로, 자신의 상태판 칩 하나가 무작위로 반대 색으로 뒤집힙니다.', timing: 'DISCUSSION', type: 'info', needsTarget: true },
             'state_infect': { name: '데이터 오염', description: '낮 토론 시간에 자신을 포함한 1명의 파란 칩 1개를 빨간 칩으로 바꿉니다.', timing: 'DISCUSSION', type: 'state', needsTarget: true },
             'state_heal': { name: '데이터 복구', description: '낮 토론 시간에 자신을 포함한 1명의 빨간 칩 1개를 파란 칩으로 바꿉니다.', timing: 'DISCUSSION', type: 'state', needsTarget: true },
             'state_scramble': { name: '신분 교란 장치', description: '최종 측정 직전에 사용하여, 다른 플레이어 1명과 자신의 상태판 전체를 맞바꿉니다.', timing: 'OBSERVATION', type: 'state', needsTarget: true },
-            'state_host': { name: '숙주 프로토콜', description: '(패시브) 밤 종료 시 필드에 에이온이 없으면, 자신이 에이온이 되고 무작위 1명을 추가 감염시킵니다.', timing: 'PASSIVE', type: 'state', needsTarget: false },
-            'state_fission': { name: '분열 변종', description: '자신이 에이온일 때, 밤 능력 사용 시간에 2명을 동시에 감염시킵니다.', timing: 'ACTION', type: 'state', needsTarget: true, maxTargets: 2 }, 
+            'state_host': { name: '숙주 프로토콜', description: '(패시브) 낮 투표 종료 시 에이온이 없으면, 자신이 에이온이 되고 밤에 2명을 감염시킵니다.', timing: 'PASSIVE', type: 'state', needsTarget: false },
+            'power_latent': { name: '잠재된 힘', description: '(패시브) 자신이 백신 개발자나 에이온이 되면, 밤 능력 사용 시 2명을 대상으로 지정할 수 있습니다. (에이온은 한 명에게 중복 감염 가능)', timing: 'PASSIVE', type: 'state', needsTarget: false }, 
             'rule_entangle': { name: '양자 얽힘', description: '낮 토론 시간에 다른 플레이어 1명과 자신을 공개적으로 얽습니다. 게임 종료 시 둘은 반드시 반대 진영이 됩니다.', timing: 'DISCUSSION', type: 'rule', needsTarget: true },
             'rule_remeasure': { name: '인과율 교란기', description: '자신의 최종 운명 측정 결과가 마음에 들지 않으면, 1회에 한해 재측정할 수 있습니다.', timing: 'MEASUREMENT', type: 'rule', needsTarget: false },
             'rule_firewall': { name: '방화벽', description: '낮 토론 시간에 사용하여, 다가오는 밤 동안 모든 플레이어를 감염으로부터 보호합니다.', timing: 'DISCUSSION', type: 'rule', needsTarget: false },
@@ -52,6 +52,7 @@
                 phaseChange: new Tone.AMSynth().toDestination(),
                 timerTick: new Tone.MembraneSynth({ pitchDecay: 0.01, octaves: 2, envelope: { attack: 0.001, decay: 0.1, sustain: 0.01, release: 0.01 } }).toDestination(),
                 roleReveal: new Tone.NoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.1, release: 0.2 } }).toDestination(),
+                cardEffect: new Tone.PluckSynth({ attackNoise: 1, dampening: 4000, resonance: 0.7 }).toDestination(),
             };
         }
         function playSound(soundName) {
@@ -68,6 +69,7 @@
                     case 'phaseChange': sounds.phaseChange.triggerAttackRelease("C3", "1n", now); break;
                     case 'timerTick': sounds.timerTick.triggerAttackRelease("C2", "8n", now); break;
                     case 'roleReveal': sounds.roleReveal.triggerAttackRelease("4n", now); break;
+                    case 'cardEffect': sounds.cardEffect.triggerAttackRelease("G5", "2n", now); break;
                 }
             } catch (e) { console.error("Sound play error:", e); }
         }
@@ -318,6 +320,18 @@
                         return;
                     }
                     
+                    // --- 카드 사용 시각 효과 처리 ---
+                    if (currentRoomData.gameState?.lastSpecialEffect && JSON.stringify(currentRoomData.gameState?.lastSpecialEffect) !== JSON.stringify(oldRoomData?.gameState?.lastSpecialEffect)) {
+                        const effect = currentRoomData.gameState.lastSpecialEffect;
+                        const card = abilityCardDeck[effect.cardId];
+                        showCardUseEffect(card.name, `${effect.userNickname} 님이 카드를 사용했습니다.`);
+                        if (localPlayer.isHost) {
+                            setTimeout(() => {
+                                updateDoc(roomRef, { 'gameState.lastSpecialEffect': deleteField() });
+                            }, 100);
+                        }
+                    }
+
                     // 게임 시작 시 역할 공개 연출
                     if (currentRoomData.status === 'playing' && oldRoomData?.status === 'waiting') {
                          if(gameTimerInterval) clearInterval(gameTimerInterval);
@@ -343,12 +357,15 @@
                         const myCardActionResult = currentRoomData.cardActionResults?.[localPlayer.id];
                         // 결과가 새로 생겼을 때만 팝업을 띄웁니다.
                         if(myCardActionResult && JSON.stringify(myCardActionResult) !== JSON.stringify(oldRoomData.cardActionResults?.[localPlayer.id])) {
-                             if(myCardActionResult.cardId === 'info_read') {
-                                 const target = currentRoomData.players[myCardActionResult.targetId];
-                                 const chipsHtml = target.quantumState.map(chip => 
-                                     `<div class="w-8 h-8 rounded ${chip === 'AEON' ? 'bg-red-500 neon-red-sm' : 'bg-blue-500 neon-blue-sm'}"></div>`
-                                 ).join('');
-                                 showCustomAlertWithHTML(`[기밀 정보 열람 결과]<br>${target.nickname}님의 상태판입니다:<br><div class="flex justify-center gap-2 mt-4">${chipsHtml}</div>`);
+                             if(myCardActionResult.cardId === 'info_heisenberg') {
+                                showCardUseEffect('하이젠베르크 관측기', '불확정성 원리 적용 중...');
+                                setTimeout(() => {
+                                    const target = currentRoomData.players[myCardActionResult.targetId];
+                                    const chipsHtml = target.quantumState.map(chip => 
+                                        `<div class="w-8 h-8 rounded ${chip === 'AEON' ? 'bg-red-500 neon-red-sm' : 'bg-blue-500 neon-blue-sm'}"></div>`
+                                    ).join('');
+                                    showCustomAlertWithHTML(`[관측 결과]<br>${target.nickname}님의 상태판입니다:<br><div class="flex justify-center gap-2 mt-4">${chipsHtml}</div>`);
+                                }, 2500);
                              } else if (myCardActionResult.cardId === 'info_trace' && myCardActionResult.details) {
                                  showCustomAlertWithHTML(`[암호 해독기 결과]<br>${myCardActionResult.details}`);
                              }
@@ -564,7 +581,8 @@
                         gameState: {
                             phase: 'DAY', round: 1, subPhase: 'DISCUSSION',
                             timer: 300, 
-                            message: "첫번째 낮입니다. 치료할 사람을 토론하세요."
+                            message: "첫번째 낮입니다. 치료할 사람을 토론하세요.",
+                            isPlayerActing: false
                         },
                         votes: {}, 
                         nightActions: {},
@@ -658,21 +676,28 @@
                 const card = abilityCardDeck[me.abilityCard];
                 const isUsable = isCardUsableNow(card, gameState);
                 const hasUsed = me.hasUsedCard;
+                
+                let buttonText = hasUsed ? '사용 완료' : (isUsable ? '사용하기' : '사용 불가');
+                let buttonDisabled = !isUsable || hasUsed;
+
+                if (card.name === '암호 해독기' && hasUsed) {
+                    buttonText = '예약됨';
+                }
 
                 myCardHtml = `
                 <div class="screen-panel p-4 ${hasUsed ? 'opacity-50' : ''}">
                     <h3 class="font-bold text-lg text-yellow-300 mb-2">내 능력 카드</h3>
                     <div class="bg-black/20 p-3 rounded-lg">
-                        <p class="font-bold text-cyan-300 text-xl font-orbitron">${card.name} ${hasUsed ? '(사용 완료)' : ''}</p>
+                        <p class="font-bold text-cyan-300 text-xl font-orbitron">${card.name} ${hasUsed && card.name !== '암호 해독기' ? '(사용 완료)' : ''}</p>
                         <p class="text-gray-300 mt-1">${card.description}</p>
                         <p class="text-xs text-gray-500 mt-2">사용 시점: ${card.timing}</p>
                         <button 
                             onclick="handleCardClick()" 
                             class="w-full mt-3 py-2 rounded text-black font-bold transition-all 
-                                ${isUsable && !hasUsed ? 'bg-yellow-400 hover:bg-yellow-300' : 'bg-gray-600 cursor-not-allowed'}"
-                            ${isUsable && !hasUsed ? '' : 'disabled'}
+                                ${!buttonDisabled ? 'bg-yellow-400 hover:bg-yellow-300' : 'bg-gray-600 cursor-not-allowed'}"
+                            ${buttonDisabled ? 'disabled' : ''}
                         >
-                            ${hasUsed ? '사용 완료' : (isUsable ? '사용하기' : '사용 불가')}
+                            ${buttonText}
                         </button>
                     </div>
                 </div>
@@ -809,6 +834,9 @@
 
             if (localPlayer.isHost && (gameState.subPhase === 'DISCUSSION' || gameState.subPhase === 'OBSERVATION')) {
                 hostSkipBtn.classList.remove('hidden');
+                hostSkipBtn.disabled = gameState.isPlayerActing;
+                hostSkipBtn.classList.toggle('opacity-50', gameState.isPlayerActing);
+                hostSkipBtn.classList.toggle('cursor-not-allowed', gameState.isPlayerActing);
             } else {
                 hostSkipBtn.classList.add('hidden');
             }
@@ -855,6 +883,11 @@
         async function hostProceedPhase() {
             if (!currentRoomId || !localPlayer.isHost) return;
             
+            if (currentRoomData.gameState.isPlayerActing) {
+                showCustomAlert('현재 다른 플레이어가 능력 카드를 사용 중입니다. 잠시만 기다려주세요.');
+                return;
+            }
+
             const roomRef = doc(db, "rooms", currentRoomId);
             const roomDocForPhase = await getDoc(roomRef);
             if (!roomDocForPhase.exists()) return;
@@ -959,6 +992,20 @@
                             newGameState.subPhase = 'VOTE';
                             newGameState.message = `최다 득표자가 ${gameState.revoteCandidates.length}명입니다. 다시 한번 투표해주세요.`;
                         } else if (gameState.subPhase === 'DAY_RESULT') {
+                            
+                            // *** NEW LOGIC START: 숙주 프로토콜 발동 체크 ***
+                            const currentAeonCount = Object.values(newPlayers).filter(p => p.isAlive && p.currentRole === 'AEON').length;
+                            if (currentAeonCount === 0) {
+                                const hostProtocolPlayer = Object.values(newPlayers).find(p => p.isAlive && p.abilityCard === 'state_host' && !p.hasUsedCard);
+                                if (hostProtocolPlayer) {
+                                    newPlayers[hostProtocolPlayer.id].quantumState = Array(6).fill('AEON');
+                                    checkAndApplyRoleChange(newPlayers[hostProtocolPlayer.id]);
+                                    newPlayers[hostProtocolPlayer.id].hasUsedCard = true; // 숙주 프로토콜은 1회성
+                                    newLogEntries.push({ round: gameState.round, phase: '낮', hostText: `에이온이 전멸하여 ${hostProtocolPlayer.nickname}님이 [숙주 프로토콜]에 따라 새로운 에이온이 되었습니다.`, playerText: `에이온이 전멸하자 [숙주 프로토콜]이 발동되었습니다.` });
+                                }
+                            }
+                            // *** NEW LOGIC END ***
+
                             newGameState.phase = 'NIGHT';
                             newGameState.subPhase = 'DISCUSSION';
                             newGameState.timer = 300;
@@ -976,31 +1023,49 @@
                             let isFirewallActive = gameState.isFirewallActive;
 
                             Object.values(newPlayers).filter(p=>p.isAlive && p.currentRole === 'DEVELOPER').forEach(p => {
-                                const targetId = nightActions[p.id]?.targetIds[0];
-                                if(targetId) protections[targetId] = p.id;
+                                const targetIds = nightActions[p.id]?.targetIds || [];
+                                targetIds.forEach(targetId => {
+                                     if(targetId) protections[targetId] = p.id;
+                                });
                             });
 
                             Object.values(newPlayers).filter(p=>p.isAlive && p.currentRole === 'AEON').forEach(p => {
                                 const targetIds = nightActions[p.id]?.targetIds || [];
-                                targetIds.forEach(targetId => {
+                                
+                                // *** NEW LOGIC START: 중복 감염 처리 로직 ***
+                                const targetsToInfect = {};
+                                targetIds.forEach(id => {
+                                    targetsToInfect[id] = (targetsToInfect[id] || 0) + 1;
+                                });
+
+                                for (const targetId in targetsToInfect) {
                                     if(targetId) {
-                                        if (protections[targetId] || isFirewallActive) {
-                                            results.failedInfections.push({ attackerId: p.id, targetId: targetId, protectorId: protections[targetId] });
-                                            if(protections[targetId] && !results.successfulProtections.find(prot => prot.targetId === targetId)) {
-                                                results.successfulProtections.push({ protectorId: protections[targetId], targetId: targetId });
+                                        const infectionCount = targetsToInfect[targetId];
+                                        for (let i = 0; i < infectionCount; i++) {
+                                            if (protections[targetId] || isFirewallActive) {
+                                                if (!results.failedInfections.find(f => f.targetId === targetId)) { // 중복 로그 방지
+                                                    results.failedInfections.push({ attackerId: p.id, targetId: targetId, protectorId: protections[targetId] });
+                                                    if(protections[targetId] && !results.successfulProtections.find(prot => prot.targetId === targetId)) {
+                                                        results.successfulProtections.push({ protectorId: protections[targetId], targetId: targetId });
+                                                    }
+                                                }
+                                            } else {
+                                                results.successfulInfections.push({ attackerId: p.id, targetId: targetId }); // 로그는 중복 기록될 수 있음
+                                                const targetPlayer = newPlayers[targetId];
+                                                const targetState = targetPlayer.quantumState;
+                                                const citizenIndex = targetState.indexOf('CITIZEN');
+                                                if (citizenIndex > -1) {
+                                                    targetState[citizenIndex] = 'AEON';
+                                                }
                                             }
-                                        } else {
-                                            results.successfulInfections.push({ attackerId: p.id, targetId: targetId });
-                                            const targetPlayer = newPlayers[targetId];
-                                            const targetState = targetPlayer.quantumState;
-                                            const citizenIndex = targetState.indexOf('CITIZEN');
-                                            if (citizenIndex > -1) {
-                                                targetState[citizenIndex] = 'AEON';
-                                            }
-                                            checkAndApplyRoleChange(targetPlayer);
                                         }
                                     }
+                                }
+                                // 감염 처리 후 역할 변경 체크
+                                Object.keys(targetsToInfect).forEach(targetId => {
+                                    if(newPlayers[targetId]) checkAndApplyRoleChange(newPlayers[targetId]);
                                 });
+                                // *** NEW LOGIC END ***
                             });
                             
                             const traceUsers = Object.keys(players).filter(pid => players[pid].abilityCard === 'info_trace' && cardActions[pid]);
@@ -1026,36 +1091,15 @@
                             if (results.successfulInfections.length === 0 && results.successfulProtections.length === 0 && !isFirewallActive) newLogEntries.push({round: gameState.round, phase: '밤', hostText: `아무 일도 일어나지 않았습니다.`, playerText: `아무 일도 일어나지 않았습니다.`});
                             
                         } else if (gameState.subPhase === 'NIGHT_RESULT') {
-                            let currentAeonCount = Object.values(newPlayers).filter(p => p.isAlive && p.currentRole === 'AEON').length;
-                            
-                            if (currentAeonCount === 0) {
-                                const hostProtocolPlayer = Object.values(newPlayers).find(p => p.isAlive && p.abilityCard === 'state_host' && !p.hasUsedCard);
-                                if (hostProtocolPlayer) {
-                                    newPlayers[hostProtocolPlayer.id].quantumState = Array(6).fill('AEON');
-                                    checkAndApplyRoleChange(newPlayers[hostProtocolPlayer.id]);
-                                    newPlayers[hostProtocolPlayer.id].hasUsedCard = true; // 숙주 프로토콜은 1회성
-                                    newLogEntries.push({ round: gameState.round, phase: '밤', hostText: `에이온이 전멸하여 ${hostProtocolPlayer.nickname}님이 [숙주 프로토콜]에 따라 새로운 에이온이 되었습니다.`, playerText: `에이온이 전멸하자 [숙주 프로토콜]이 발동되었습니다.` });
-                                    const otherLivingPlayers = Object.values(newPlayers).filter(p => p.isAlive && p.id !== hostProtocolPlayer.id);
-                                    if (otherLivingPlayers.length > 0) {
-                                        const randomTarget = otherLivingPlayers[Math.floor(Math.random() * otherLivingPlayers.length)];
-                                        const targetState = newPlayers[randomTarget.id].quantumState;
-                                        const citizenIndex = targetState.indexOf('CITIZEN');
-                                        if (citizenIndex > -1) {
-                                            targetState[citizenIndex] = 'AEON';
-                                            checkAndApplyRoleChange(newPlayers[randomTarget.id]);
-                                            newLogEntries.push({ round: gameState.round, phase: '밤', hostText: `${hostProtocolPlayer.nickname}님이 ${randomTarget.nickname}님을 추가 감염시켰습니다.`, playerText: `[숙주 프로토콜]에 의해 추가 감염이 발생했습니다.` });
-                                        }
-                                    }
-                                }
-                            }
 
+                            // 숙주 프로토콜 로직을 낮으로 이동했으므로 여기서는 삭제
+                            
                             const finalAeonCount = Object.values(newPlayers).filter(p => p.isAlive && p.currentRole === 'AEON').length;
                             newLogEntries.push({ round: gameState.round, phase: '밤', hostText: `현재 에이온 수: ${finalAeonCount}명`, playerText: `현재 에이온 수: ${finalAeonCount}명`});
 
                             newGameState.round += 1;
                             if (newGameState.round > room.totalRounds) {
                                 newGameState.phase = 'END';
-                                // BUG FIX: 클래식 모드도 카오스 모드처럼 OBSERVATION 단계를 먼저 거치도록 수정
                                 newGameState.subPhase = 'OBSERVATION';
                                 newGameState.timer = 30; 
                                 newGameState.message = "라운드가 종료되었습니다. 최종 상태판을 확인하세요.";
@@ -1122,25 +1166,34 @@
                     if (nightActions[localPlayer.id]) {
                          showActionPopup("밤 행동 완료", "다른 플레이어의 선택을 기다립니다...", false);
                     } else if (me.currentRole === 'CITIZEN') {
-                        submitNightAction([]); // 시민은 행동 없이 바로 완료 처리
+                        submitNightAction([]);
                     } else {
-                        // *** BUG FIX START: 개발자가 자신을 보호할 수 있도록 로직 수정 ***
+                        // *** BUG FIX START: 개발자/에이온 능력 강화 로직 수정 ***
                         let maxTargets = 1;
                         let title, desc, actionTargets;
+                        
+                        const isSuperPowered = (me.abilityCard === 'power_latent') || (me.abilityCard === 'state_host' && me.hasUsedCard);
 
                         if (me.currentRole === 'DEVELOPER') {
                             title = "보호 활동";
-                            desc = "감염으로부터 보호할 플레이어를 선택하세요. (자신 포함)";
-                            actionTargets = Object.values(players).filter(p => p.isAlive); // 자신을 포함
+                            actionTargets = Object.values(players).filter(p => p.isAlive); // 자신 포함
+                            if (isSuperPowered) {
+                                maxTargets = 2;
+                                desc = "[잠재된 힘] 보호할 플레이어 2명을 선택하세요. (자신 포함)";
+                            } else {
+                                desc = "감염으로부터 보호할 플레이어를 선택하세요. (자신 포함)";
+                            }
                         } else { // AEON
                             title = "감염 활동";
-                            desc = "감염시킬 플레이어를 선택하세요.";
-                            actionTargets = Object.values(players).filter(p => p.isAlive && p.id !== me.id); // 자신을 제외
-
-                            if (me.abilityCard === 'state_fission' && !me.hasUsedCard) {
+                            actionTargets = Object.values(players).filter(p => p.isAlive && p.id !== me.id);
+                            
+                            if (isSuperPowered) {
                                 maxTargets = 2;
-                                title = "[분열 변종] 감염 활동";
-                                desc = "감염시킬 플레이어 2명을 선택하세요.";
+                                title = me.abilityCard === 'state_host' ? "[숙주 프로토콜] 감염 활동" : "[잠재된 힘] 감염 활동";
+                                desc = "감염시킬 플레이어 2명을 선택하세요. (한 명에게 중복 가능)";
+                                actionTargets = Object.values(players).filter(p => p.isAlive); // 중복 감염을 위해 자신도 잠시 포함 (로직상 문제는 없음)
+                            } else {
+                                desc = "감염시킬 플레이어를 선택하세요.";
                             }
                         }
                         showVotePopup(title, desc, actionTargets, 'submitNightAction', maxTargets);
@@ -1246,30 +1299,62 @@
             
             let selectedTargets = [];
             const targetsEl = popup.querySelector('#vote-targets');
+
+            const isDuplicateSelectionAllowed = maxTargets > 1 && title.includes('감염 활동');
+
+            const redrawSelections = () => {
+                targets.forEach(p => {
+                    const targetBtn = document.getElementById(`votebtn-${p.id}`);
+                    if (!targetBtn) return;
+                    const selectionCount = selectedTargets.filter(id => id === p.id).length;
+                    
+                    if (selectionCount > 0) {
+                        targetBtn.classList.add('bg-cyan-500');
+                        let badge = targetBtn.querySelector('.selection-badge');
+                        if (!badge) {
+                            badge = document.createElement('span');
+                            badge.className = 'selection-badge absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold';
+                            targetBtn.classList.add('relative');
+                            targetBtn.appendChild(badge);
+                        }
+                        badge.innerText = selectionCount;
+                        badge.classList.remove('hidden');
+                    } else {
+                        targetBtn.classList.remove('bg-cyan-500');
+                        const badge = targetBtn.querySelector('.selection-badge');
+                        if (badge) badge.classList.add('hidden');
+                    }
+                });
+                const confirmBtn = document.getElementById('vote-confirm-btn');
+                if (confirmBtn) {
+                     confirmBtn.disabled = selectedTargets.length !== maxTargets;
+                     confirmBtn.innerText = `선택 완료 (${selectedTargets.length}/${maxTargets})`;
+                }
+            };
             
             window.selectTarget = (targetId) => {
-                const btn = document.getElementById(`votebtn-${targetId}`);
                 const index = selectedTargets.indexOf(targetId);
 
-                if (index > -1) {
-                    selectedTargets.splice(index, 1);
-                    btn.classList.remove('bg-cyan-500');
+                if (!isDuplicateSelectionAllowed && index > -1) {
+                    selectedTargets.splice(index, 1); // Deselect for non-duplicate mode
                 } else {
                     if (selectedTargets.length < maxTargets) {
                         selectedTargets.push(targetId);
-                        btn.classList.add('bg-cyan-500');
                     }
                 }
                 
                 if (maxTargets === 1 && selectedTargets.length === 1) {
                     window[action](selectedTargets);
                 } else {
-                    const confirmBtn = document.getElementById('vote-confirm-btn');
-                    confirmBtn.disabled = selectedTargets.length !== maxTargets;
-                    confirmBtn.innerText = `선택 완료 (${selectedTargets.length}/${maxTargets})`;
+                    redrawSelections();
                 }
             };
             
+            window.resetSelection = () => {
+                selectedTargets = [];
+                redrawSelections();
+            };
+
             targets.sort((a, b) => a.number - b.number);
             targetsEl.innerHTML = targets.map(p => `
                 <button id="votebtn-${p.id}" class="w-full text-left p-3 bg-gray-700/50 hover:bg-cyan-600 rounded-lg transition" onclick="selectTarget('${p.id}')">
@@ -1277,7 +1362,10 @@
                 </button>
             `).join('') + `
                 <div id="vote-confirm-container" class="mt-4 ${maxTargets > 1 ? '' : 'hidden'}">
-                    <button id="vote-confirm-btn" class="w-full btn-primary" disabled>선택 완료 (0/${maxTargets})</button>
+                    <div class="flex gap-2">
+                        <button id="vote-confirm-btn" class="w-full btn-primary" disabled>선택 완료 (0/${maxTargets})</button>
+                        <button onclick="resetSelection()" class="btn-secondary px-4">초기화</button>
+                    </div>
                 </div>
             `;
 
@@ -1291,6 +1379,9 @@
             popup.classList.remove('hidden');
         }
         function hideActionPopup() {
+            if (currentRoomId && !localPlayer.isHost && currentRoomData?.gameState?.isPlayerActing) {
+                updateDoc(doc(db, 'rooms', currentRoomId), { 'gameState.isPlayerActing': false });
+            }
             document.getElementById('action-popup').classList.add('hidden');
             document.getElementById('vote-popup').classList.add('hidden');
         }
@@ -1325,14 +1416,25 @@
 
         // --- 게임 종료 ---
         function updateObservationUI(room) {
-            const { players, gameState, gameMode, cardActions } = room;
+            const { players, gameState, gameMode } = room;
             const observationTextEl = document.getElementById('observation-text');
             const hostControlsEl = document.getElementById('host-observation-controls');
             const timerText = document.getElementById('observation-timer');
+            const scrambleControlsEl = document.getElementById('scramble-controls');
+            
             hostControlsEl.classList.add('hidden');
-        
+            scrambleControlsEl.classList.add('hidden');
+
+            const me = players[localPlayer.id];
+            const hasScrambleCard = me && me.abilityCard === 'state_scramble' && !me.hasUsedCard;
+
             if (gameState.subPhase === 'OBSERVATION') {
-                observationTextEl.innerText = "모든 플레이어의 최종 상태판이 공개됩니다. 30초 후 호스트가 운명 측정을 시작합니다.";
+                if (hasScrambleCard) {
+                    observationTextEl.innerText = "다른 플레이어의 상태판이 블라인드 처리되었습니다. 신분 교란 장치를 사용하세요.";
+                    scrambleControlsEl.classList.remove('hidden');
+                } else {
+                    observationTextEl.innerText = "모든 플레이어의 최종 상태판이 공개됩니다. 30초 후 호스트가 운명 측정을 시작합니다.";
+                }
             } else if (gameState.subPhase === 'MEASUREMENT_READY') {
                 observationTextEl.innerText = "호스트가 각 플레이어의 운명을 측정합니다.";
                 timerText.innerText = "측정 대기 중...";
@@ -1340,9 +1442,14 @@
             
             const observationEl = document.getElementById('observation-player-list');
             observationEl.innerHTML = Object.values(players).sort((a,b)=>a.number - b.number).map(p => {
-                const chipsHtml = p.quantumState.map(chip => 
-                    `<div class="w-full h-4 rounded ${chip === 'AEON' ? 'bg-red-500 neon-red-sm' : 'bg-blue-500 neon-blue-sm'}"></div>`
-                ).join('');
+                const isSelf = p.id === localPlayer.id;
+                const isBlinded = hasScrambleCard && !isSelf;
+
+                const chipsHtml = isBlinded 
+                    ? Array(6).fill('<div class="w-full h-4 rounded bg-gray-600 animate-pulse"></div>').join('')
+                    : p.quantumState.map(chip => 
+                        `<div class="w-full h-4 rounded ${chip === 'AEON' ? 'bg-red-500 neon-red-sm' : 'bg-blue-500 neon-blue-sm'}"></div>`
+                      ).join('');
                 
                 const isMeasurable = localPlayer.isHost && !p.finalRole && p.isAlive && gameState.subPhase === 'MEASUREMENT_READY';
                 
@@ -1371,7 +1478,6 @@
                         </div>`;
             }).join('');
             
-            
             if(gameTimerInterval) clearInterval(gameTimerInterval);
             let timer = gameState.timer;
 
@@ -1387,21 +1493,20 @@
                 return;
             }
             
-            if (gameState.subPhase === 'OBSERVATION') {
+            if (gameState.subPhase === 'OBSERVATION' && !hasScrambleCard) {
                 timerText.innerText = Math.max(0, timer);
-                if (timer > 0) { // Only set interval if timer is running
+                if (timer > 0) {
                     gameTimerInterval = setInterval(() => {
                         timer--;
                         timerText.innerText = Math.max(0, timer);
                         if (timer < 0) {
                             clearInterval(gameTimerInterval);
                             if (localPlayer.isHost) {
-                                // BUG FIX: 클래식 모드에서는 바로 측정 단계로 넘어가도록 수정
                                 if (gameMode === 'classic') {
                                     const roomRef = doc(db, 'rooms', currentRoomId);
                                     updateDoc(roomRef, { 'gameState.subPhase': 'MEASUREMENT_READY' });
-                                } else { // Chaos Mode
-                                    const hasCardsToPlay = cardActions && Object.values(cardActions).some(a => abilityCardDeck[a.cardId]?.timing === 'OBSERVATION');
+                                } else { 
+                                    const hasCardsToPlay = currentRoomData.cardActions && Object.values(currentRoomData.cardActions).some(a => abilityCardDeck[a.cardId]?.timing === 'OBSERVATION');
                                     if (!hasCardsToPlay) {
                                         const roomRef = doc(db, 'rooms', currentRoomId);
                                         updateDoc(roomRef, { 'gameState.subPhase': 'MEASUREMENT_READY' });
@@ -1415,13 +1520,13 @@
                             }
                         }
                     }, 1000);
-                } else { // Timer is already 0 or less when rendering
+                } else {
                     if (localPlayer.isHost) {
                         if (gameMode === 'classic') {
                             const roomRef = doc(db, 'rooms', currentRoomId);
                             updateDoc(roomRef, { 'gameState.subPhase': 'MEASUREMENT_READY' });
                         } else {
-                            const hasCardsToPlay = cardActions && Object.values(cardActions).some(a => abilityCardDeck[a.cardId]?.timing === 'OBSERVATION');
+                            const hasCardsToPlay = currentRoomData.cardActions && Object.values(currentRoomData.cardActions).some(a => abilityCardDeck[a.cardId]?.timing === 'OBSERVATION');
                             if (!hasCardsToPlay) {
                                  const roomRef = doc(db, 'rooms', currentRoomId);
                                  updateDoc(roomRef, { 'gameState.subPhase': 'MEASUREMENT_READY' });
@@ -1434,6 +1539,8 @@
                         timerText.innerText = "호스트 대기 중...";
                     }
                 }
+            } else if (hasScrambleCard) {
+                timerText.innerText = "결정 대기 중...";
             }
         }
         
@@ -1448,6 +1555,7 @@
                       let { players, cardActions } = room;
                       let newPlayers = JSON.parse(JSON.stringify(players));
                       let newLogEntries = [];
+                      let lastSpecialEffect = null;
 
                       if (cardActions) {
                           for(const playerId in cardActions) {
@@ -1455,12 +1563,15 @@
                                const card = abilityCardDeck[action.cardId];
                                if (card.timing === 'OBSERVATION') {
                                    const user = newPlayers[playerId];
-                                   const target = newPlayers[action.targetIds[0]];
-                                   if (action.cardId === 'state_scramble' && user && target) {
+                                   const targetId = action.targetIds[0];
+                                   const target = newPlayers[targetId];
+                                   
+                                   if (action.cardId === 'state_scramble' && user && target && playerId !== targetId) {
                                        const userState = [...user.quantumState];
                                        newPlayers[playerId].quantumState = [...target.quantumState];
-                                       newPlayers[action.targetIds[0]].quantumState = userState;
+                                       newPlayers[targetId].quantumState = userState;
                                        newLogEntries.push({ round: '종료', phase: '관측', hostText: `${user.nickname}님이 [신분 교란 장치]를 사용했습니다.`, playerText: `[신분 교란 장치]가 발동하여 누군가의 상태판이 뒤바뀌었습니다.`});
+                                       lastSpecialEffect = { cardId: 'state_scramble', userNickname: user.nickname };
                                    }
                                }
                           }
@@ -1468,6 +1579,7 @@
                       transaction.update(roomRef, {
                           players: newPlayers,
                           'gameState.subPhase': 'MEASUREMENT_READY',
+                          'gameState.lastSpecialEffect': lastSpecialEffect,
                           eventLog: arrayUnion(...newLogEntries)
                       });
                  });
@@ -1729,9 +1841,15 @@
                 const target = players[targetId];
 
                 switch(action.cardId) {
-                    case 'info_read':
+                    case 'info_heisenberg':
                         cardActionResults[playerId] = { cardId: action.cardId, targetId: targetId };
-                        logEntries.push({round: gameState.round, phase: '낮', hostText: `${user.nickname}님이 [기밀 정보 열람] 카드를 사용했습니다.`, playerText: `${user.nickname}님이 능력 카드를 사용했습니다.`});
+                        // 상태 교란 로직
+                        const userState = user.quantumState;
+                        if (userState.length > 0) {
+                            const randomIndex = Math.floor(Math.random() * userState.length);
+                            userState[randomIndex] = userState[randomIndex] === 'AEON' ? 'CITIZEN' : 'AEON';
+                        }
+                        logEntries.push({round: gameState.round, phase: '낮', hostText: `${user.nickname}님이 [하이젠베르크 관측기] 카드를 사용했습니다.`, playerText: `${user.nickname}님이 능력 카드를 사용했습니다.`});
                         break;
                     case 'info_trace':
                         cardActionResults[playerId] = { cardId: action.cardId, details: null };
@@ -1775,7 +1893,9 @@
         function isCardUsableNow(card, gameState) {
             if (!card || card.timing === 'PASSIVE') return false;
             
-            if(card.name === '분열 변종') return false; 
+            if (gameState.phase === 'END' && card.timing === 'OBSERVATION') {
+                return true;
+            }
             
             if(card.name === '인과율 교란기') {
                 const actorId = actingBotId || localPlayer.id;
@@ -1788,12 +1908,16 @@
 
         function handleCardClick() {
             playSound('click');
+            if (currentRoomData.gameState.isPlayerActing) {
+                showCustomAlert('다른 플레이어가 먼저 카드를 사용 중입니다. 잠시 후 시도해주세요.');
+                return;
+            }
             const me = currentRoomData.players[localPlayer.id];
             const card = abilityCardDeck[me.abilityCard];
             showCustomAlertWithHTML(`'${card.name}' 카드를 사용하시겠습니까? <br/><br/> <div class="flex justify-center gap-4"><button onclick="confirmUseCard(false)" class="btn-primary">예</button><button onclick="hideCustomAlert()" class="btn-secondary">아니요</button></div>`);
         }
 
-        function confirmUseCard(isBotAction = false) {
+        async function confirmUseCard(isBotAction = false) {
             playSound('click');
             hideCustomAlert();
             const actorId = isBotAction ? actingBotId : localPlayer.id;
@@ -1801,13 +1925,17 @@
                 if(isBotAction) actingBotId = null;
                 return;
             }
+            const roomRef = doc(db, 'rooms', currentRoomId);
+            await updateDoc(roomRef, { 'gameState.isPlayerActing': true });
 
             const actor = currentRoomData.players[actorId];
             const card = abilityCardDeck[actor.abilityCard];
             
             if (card.needsTarget) {
                 let targets = Object.values(currentRoomData.players).filter(p => p.isAlive);
-                if (card.timing === 'OBSERVATION' || card.name === '양자 얽힘') {
+                if (card.name === '신분 교란 장치') {
+                    // 자신도 포함
+                } else if (card.timing === 'OBSERVATION' || card.name === '양자 얽힘') {
                     targets = targets.filter(p => p.id !== actorId);
                 }
                 const title = isBotAction ? `[${actor.nickname} 사용] ${card.name}` : `[${card.name}] 대상 선택`;
@@ -1829,17 +1957,32 @@
             if (!cardId || actor.hasUsedCard) {
                 showCustomAlert("카드를 사용할 수 없습니다.");
                 if (actingBotId) actingBotId = null;
+                const roomRef = doc(db, 'rooms', currentRoomId);
+                await updateDoc(roomRef, { 'gameState.isPlayerActing': false });
                 return;
             }
-
             const roomRef = doc(db, 'rooms', currentRoomId);
-            await updateDoc(roomRef, {
+            const updates = {
                 [`cardActions.${actorId}`]: { cardId: cardId, targetIds: targetIds, userNickname: actor.nickname },
-                [`players.${actorId}.hasUsedCard`]: true
-            });
+                [`players.${actorId}.hasUsedCard`]: true,
+                'gameState.isPlayerActing': false
+            };
+            await updateDoc(roomRef, updates);
             
+            const card = abilityCardDeck[cardId];
+            if (card.type === 'state') {
+                 showCardUseEffect(card.name, '상태판을 변경합니다...');
+            }
+
             if (actingBotId) actingBotId = null;
-            showCustomAlert("카드 능력을 사용 예약했습니다.");
+
+            if (cardId === 'info_trace') {
+                showCustomAlert("'암호 해독기' 사용이 예약되었습니다. 밤이 끝난 후 결과를 확인합니다.");
+            } else {
+                 if(cardId !== 'info_heisenberg') {
+                    showCustomAlert("카드 능력을 사용 예약했습니다.");
+                 }
+            }
         }
 
         function showRoleRevealPopup() {
@@ -1874,6 +2017,17 @@
             setTimeout(() => {
                 overlay.classList.add('hidden');
             }, 2800);
+        }
+
+        function showCardUseEffect(cardName, subtitle, duration = 2500) {
+            const overlay = document.getElementById('card-effect-overlay');
+            document.getElementById('card-effect-name').innerText = cardName;
+            document.getElementById('card-effect-subtitle').innerText = subtitle;
+            overlay.classList.remove('hidden');
+            playSound('cardEffect');
+            setTimeout(() => {
+                overlay.classList.add('hidden');
+            }, duration);
         }
         
         // --- 초기화 및 전역 할당 ---
@@ -1963,6 +2117,7 @@
             document.getElementById('close-custom-alert-btn').addEventListener('click', hideCustomAlert);
             document.getElementById('event-log-btn').addEventListener('click', showEventLogPopup);
             document.getElementById('close-event-log-btn').addEventListener('click', hideEventLogPopup);
+            document.getElementById('scramble-use-btn').addEventListener('click', handleCardClick);
             
             showScreen('nickname-screen');
         };
@@ -2278,6 +2433,9 @@
             <div id="host-observation-controls" class="mt-4 hidden">
                 <button id="host-apply-observation-cards-btn" class="btn-primary">카드 효과 적용 및 측정 시작</button>
             </div>
+             <div id="scramble-controls" class="mt-4 hidden">
+                <button id="scramble-use-btn" class="btn-primary">능력 사용하기</button>
+            </div>
         </div>
         <div id="end-result-screen" class="screen hidden w-full max-w-2xl text-center screen-panel">
             <h1 id="end-title" class="title-text text-3xl sm:text-5xl font-bold mb-8"></h1>
@@ -2399,7 +2557,7 @@
                         <div class="space-y-4">
                             <div>
                                 <h4 class="font-bold text-xl text-yellow-300">정보전 카드</h4>
-                                <p><strong>기밀 정보 열람:</strong> '낮 토론' 시간에 사용 가능. 대상을 1명 선택하면, 즉시 그 대상의 상태판을 혼자만 볼 수 있는 팝업이 나타납니다.</p>
+                                <p><strong>하이젠베르크 관측기:</strong> '낮 토론' 시간에 사용. 다른 플레이어 1명의 상태판을 정확하게 확인하는 대가(불확정성 원리)로, 자신의 상태판 칩 하나가 무작위로 반대 색으로 뒤집힙니다.</p>
                                 <p><strong>암호 해독기:</strong> '낮 토론' 시간에 사용 가능. '사용하기' 버튼을 누르면 즉시 예약되며, 밤이 끝난 후 모든 능력 사용 결과가 요약된 팝업이 나타납니다.</p>
                             </div>
                             <div>
@@ -2452,6 +2610,13 @@
         <!-- 단계 전환 오버레이 -->
         <div id="phase-transition-overlay" class="hidden absolute inset-0 bg-black/90 flex items-center justify-center z-[103] pointer-events-none">
             <p id="phase-transition-text" class="title-text text-3xl animate-pulse-slow"></p>
+        </div>
+
+        <!-- 카드 사용 효과 오버레이 -->
+        <div id="card-effect-overlay" class="hidden absolute inset-0 bg-black/90 flex-col items-center justify-center z-[104] pointer-events-none">
+            <h2 id="card-effect-name" class="title-text text-4xl animate-pulse-slow"></h2>
+            <div class="glitch-line w-1/2 my-4"></div>
+            <p id="card-effect-subtitle" class="text-xl text-yellow-300"></p>
         </div>
     </div>
 </body>
