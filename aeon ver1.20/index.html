@@ -27,7 +27,6 @@
         let actingBotId = null;
         let selectedGameMode = 'classic';
         let myInitialRoleForReveal = null;
-        let appId = 'default-app-id'; // 앱 ID 저장을 위한 변수 추가
 
         // --- 카드 정의 ---
         const abilityCardDeck = {
@@ -164,8 +163,7 @@
 
             if (roomListUnsubscribe) roomListUnsubscribe();
 
-            const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-            const q = query(collection(db, roomsCollectionPath), where("status", "==", "waiting"), where("gameMode", "==", gameMode)); // 경로 수정
+            const q = query(collection(db, 'rooms'), where("status", "==", "waiting"), where("gameMode", "==", gameMode)); 
             roomListUnsubscribe = onSnapshot(q, (snapshot) => {
                 if (snapshot.empty) {
                     roomListEl.innerHTML = '<div class="text-white text-center">참여할 수 있는 방이 없습니다.</div>';
@@ -204,8 +202,7 @@
                     roomListUnsubscribe();
                     roomListUnsubscribe = null;
                 }
-                const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-                const roomRef = doc(collection(db, roomsCollectionPath)); // 경로 수정
+                const roomRef = doc(collection(db, 'rooms')); 
                 currentRoomId = roomRef.id;
                 localPlayer.isHost = true;
                 
@@ -233,13 +230,11 @@
             playSound('click');
             localPlayer.isHost = false;
             
-            const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-
             if (hasPassword) {
                 const password = prompt('비밀번호를 입력하세요:');
                 if (password === null) return;
 
-                const roomRef = doc(db, roomsCollectionPath, roomId); // 경로 수정
+                const roomRef = doc(db, 'rooms', roomId); 
                 const roomDoc = await getDoc(roomRef);
                 if(roomDoc.exists() && roomDoc.data().password !== password) {
                     showCustomAlert('비밀번호가 틀립니다.');
@@ -255,7 +250,7 @@
                 showScreen('lobby-screen');
                 
                 await runTransaction(db, async (transaction) => {
-                    const roomRef = doc(db, roomsCollectionPath, roomId); // 경로 수정
+                    const roomRef = doc(db, 'rooms', roomId); 
                     const roomDoc = await transaction.get(roomRef);
                     if (!roomDoc.exists()) throw new Error("방이 존재하지 않습니다.");
                     const room = roomDoc.data();
@@ -309,8 +304,7 @@
         }
 
         function subscribeToRoom(roomId) {
-            const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-            const roomRef = doc(db, roomsCollectionPath, roomId); // 경로 수정
+            const roomRef = doc(db, 'rooms', roomId); 
             if (roomUnsubscribe) roomUnsubscribe();
             roomUnsubscribe = onSnapshot(roomRef, (doc) => {
                 if (doc.exists()) {
@@ -476,8 +470,7 @@
         async function toggleReady() {
             playSound('click');
             if (!currentRoomId || localPlayer.isHost) return;
-            const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-            const roomRef = doc(db, roomsCollectionPath, currentRoomId); // 경로 수정
+            const roomRef = doc(db, 'rooms', currentRoomId); 
             const playerRef = `players.${localPlayer.id}.isReady`;
             const docSnap = await getDoc(roomRef);
             if (docSnap.exists()) {
@@ -499,8 +492,7 @@
             }
             
             try {
-                const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-                const roomRef = doc(db, roomsCollectionPath, localIdBeforeLeave); // 경로 수정
+                const roomRef = doc(db, 'rooms', localIdBeforeLeave); 
                 if (isHost) {
                     await deleteDoc(roomRef);
                 } else {
@@ -523,8 +515,7 @@
         async function startGame() {
             playSound('click');
             if (!currentRoomId || !localPlayer.isHost) return;
-            const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-            const roomRef = doc(db, roomsCollectionPath, currentRoomId); // 경로 수정
+            const roomRef = doc(db, 'rooms', currentRoomId); 
             try {
                 await runTransaction(db, async (transaction) => {
                     const roomDoc = await transaction.get(roomRef);
@@ -897,8 +888,7 @@
                 return;
             }
 
-            const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-            const roomRef = doc(db, roomsCollectionPath, currentRoomId); // 경로 수정
+            const roomRef = doc(db, 'rooms', currentRoomId); 
             const roomDocForPhase = await getDoc(roomRef);
             if (!roomDocForPhase.exists()) return;
             const currentSubPhase = roomDocForPhase.data().gameState.subPhase;
@@ -1390,7 +1380,7 @@
         }
         function hideActionPopup() {
             if (currentRoomId && !localPlayer.isHost && currentRoomData?.gameState?.isPlayerActing) {
-                updateDoc(doc(db, `artifacts/${appId}/public/data/rooms`, currentRoomId), { 'gameState.isPlayerActing': false });
+                updateDoc(doc(db, 'rooms', currentRoomId), { 'gameState.isPlayerActing': false });
             }
             document.getElementById('action-popup').classList.add('hidden');
             document.getElementById('vote-popup').classList.add('hidden');
@@ -1398,8 +1388,7 @@
 
         async function submitVote(targetIds) {
             if (!currentRoomId || targetIds.length === 0) return;
-            const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-            const roomRef = doc(db, roomsCollectionPath, currentRoomId); // 경로 수정
+            const roomRef = doc(db, 'rooms', currentRoomId); 
             const actorId = actingBotId || localPlayer.id;
             await updateDoc(roomRef, { [`votes.${actorId}`]: targetIds[0] });
             hideActionPopup();
@@ -1409,8 +1398,7 @@
             if (!currentRoomId) return;
             if (!Array.isArray(targetIds)) targetIds = [targetIds];
             
-            const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-            const roomRef = doc(db, roomsCollectionPath, currentRoomId); // 경로 수정
+            const roomRef = doc(db, 'rooms', currentRoomId); 
             const actorId = actingBotId || localPlayer.id;
 
             const updates = {};
@@ -1496,8 +1484,7 @@
                 if(localPlayer.isHost) {
                     timerText.innerText = "5초 후 결과를 공개합니다...";
                     setTimeout(() => {
-                        const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-                        const roomRef = doc(db, roomsCollectionPath, currentRoomId); // 경로 수정
+                        const roomRef = doc(db, 'rooms', currentRoomId); 
                         updateDoc(roomRef, { 'gameState.subPhase': 'RESULT' });
                     }, 5000);
                 }
@@ -1513,8 +1500,7 @@
                         if (timer < 0) {
                             clearInterval(gameTimerInterval);
                             if (localPlayer.isHost) {
-                                const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-                                const roomRef = doc(db, roomsCollectionPath, currentRoomId); // 경로 수정
+                                const roomRef = doc(db, 'rooms', currentRoomId); 
                                 if (gameMode === 'classic') {
                                     updateDoc(roomRef, { 'gameState.subPhase': 'MEASUREMENT_READY' });
                                 } else { 
@@ -1533,8 +1519,7 @@
                     }, 1000);
                 } else {
                     if (localPlayer.isHost) {
-                        const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-                        const roomRef = doc(db, roomsCollectionPath, currentRoomId); // 경로 수정
+                        const roomRef = doc(db, 'rooms', currentRoomId); 
                         if (gameMode === 'classic') {
                             updateDoc(roomRef, { 'gameState.subPhase': 'MEASUREMENT_READY' });
                         } else {
@@ -1557,8 +1542,7 @@
         
         async function hostApplyObservationCards() {
              if (!currentRoomId || !localPlayer.isHost) return;
-             const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-             const roomRef = doc(db, roomsCollectionPath, currentRoomId); // 경로 수정
+             const roomRef = doc(db, 'rooms', currentRoomId); 
              try {
                  await runTransaction(db, async (transaction) => {
                       const roomDoc = await transaction.get(roomRef);
@@ -1603,8 +1587,7 @@
 
         async function measurePlayer(playerId) {
           if (!localPlayer.isHost) return;
-          const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-          const roomRef = doc(db, roomsCollectionPath, currentRoomId); // 경로 수정
+          const roomRef = doc(db, 'rooms', currentRoomId); 
           const playerToMeasure = currentRoomData.players[playerId];
           if (!playerToMeasure || playerToMeasure.finalRole) return;
           
@@ -1623,8 +1606,7 @@
             const me = currentRoomData.players[targetPlayerId];
             if (me.abilityCard !== 'rule_remeasure' || me.hasUsedCard) return;
 
-            const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-            const roomRef = doc(db, roomsCollectionPath, currentRoomId); // 경로 수정
+            const roomRef = doc(db, 'rooms', currentRoomId); 
             await updateDoc(roomRef, {
                 [`players.${targetPlayerId}.finalRole`]: null,
                 [`players.${targetPlayerId}.hasUsedCard`]: true
@@ -1684,8 +1666,7 @@
                 return; 
             }
             try {
-                const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-                const roomRef = doc(db, roomsCollectionPath, currentRoomId); // 경로 수정
+                const roomRef = doc(db, 'rooms', currentRoomId); 
                 const docSnap = await getDoc(roomRef);
                 if(docSnap.exists()) {
                     const originalPlayers = docSnap.data().players;
@@ -1721,8 +1702,7 @@
         // --- 개발자 모드 전용 함수 ---
         function addBotPlayer() {
             if (!isDevMode || !localPlayer.isHost) return;
-            const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-            const roomRef = doc(db, roomsCollectionPath, currentRoomId); // 경로 수정
+            const roomRef = doc(db, 'rooms', currentRoomId); 
             runTransaction(db, async (transaction) => {
                 const roomDoc = await transaction.get(roomRef);
                 if (!roomDoc.exists()) return;
@@ -1941,8 +1921,7 @@
                 if(isBotAction) actingBotId = null;
                 return;
             }
-            const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-            const roomRef = doc(db, roomsCollectionPath, currentRoomId); // 경로 수정
+            const roomRef = doc(db, 'rooms', currentRoomId); 
             await updateDoc(roomRef, { 'gameState.isPlayerActing': true });
 
             const actor = currentRoomData.players[actorId];
@@ -1974,13 +1953,11 @@
             if (!cardId || actor.hasUsedCard) {
                 showCustomAlert("카드를 사용할 수 없습니다.");
                 if (actingBotId) actingBotId = null;
-                const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-                const roomRef = doc(db, roomsCollectionPath, currentRoomId); // 경로 수정
+                const roomRef = doc(db, 'rooms', currentRoomId); 
                 await updateDoc(roomRef, { 'gameState.isPlayerActing': false });
                 return;
             }
-            const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-            const roomRef = doc(db, roomsCollectionPath, currentRoomId); // 경로 수정
+            const roomRef = doc(db, 'rooms', currentRoomId); 
             const updates = {
                 [`cardActions.${actorId}`]: { cardId: cardId, targetIds: targetIds, userNickname: actor.nickname },
                 [`players.${actorId}.hasUsedCard`]: true,
@@ -2066,13 +2043,12 @@
             // Firebase 초기화
             try {
                 let firebaseConfig;
-                if (typeof __firebase_config !== 'undefined') {
+                // *** FIX: Canvas/Vercel 환경을 구분하는 더 안전한 로직 ***
+                if (typeof __firebase_config !== 'undefined' && __firebase_config) {
                     firebaseConfig = JSON.parse(__firebase_config);
-                    // appId 가져오기
-                    appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id'; 
                 } else {
                     console.warn("로컬 개발용 Firebase 임시 설정을 사용합니다. 배포 시에는 실제 설정으로 교체해야 합니다.");
-                    // 로컬 테스트를 위한 임시 Firebase 설정
+                    // Vercel/Local fallback
                     firebaseConfig = {
                         apiKey: "AIzaSyCrgCH3e-lmd79bb-aU74QfZUfvI8_m0vI",
                         authDomain: "aeon-game-726d8.firebaseapp.com",
@@ -2170,8 +2146,7 @@
         window.setTotalRounds = async (rounds) => {
             playSound('click');
             if (!currentRoomId || !localPlayer.isHost) return;
-            const roomsCollectionPath = `artifacts/${appId}/public/data/rooms`; // 경로 수정
-            const roomRef = doc(db, roomsCollectionPath, currentRoomId); // 경로 수정
+            const roomRef = doc(db, 'rooms', currentRoomId); 
             try {
                 await updateDoc(roomRef, { totalRounds: rounds });
             } catch (error) {
