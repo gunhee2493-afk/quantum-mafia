@@ -165,11 +165,27 @@
 
             const q = query(collection(db, 'rooms'), where("status", "==", "waiting"), where("gameMode", "==", gameMode)); 
             roomListUnsubscribe = onSnapshot(q, (snapshot) => {
-                if (snapshot.empty) {
+                // --- 유령 대기방 자동 정리: 생성된 지 30분이 지난 빈(참가자 0명) 대기방 삭제 ---
+                const STALE_MS = 30 * 60 * 1000;
+                const now = Date.now();
+                const visibleDocs = snapshot.docs.filter(d => {
+                    const room = d.data();
+                    if (!room || !room.host) return false;
+                    const playerCount = room.players ? Object.keys(room.players).length : 0;
+                    const createdMs = room.createdAt?.toMillis ? room.createdAt.toMillis() : null;
+                    const isStale = playerCount === 0 && createdMs !== null && (now - createdMs) > STALE_MS;
+                    if (isStale) {
+                        deleteDoc(doc(db, 'rooms', d.id)).catch(e => console.error("Stale room cleanup failed:", e));
+                        return false;
+                    }
+                    return true;
+                });
+
+                if (visibleDocs.length === 0) {
                     roomListEl.innerHTML = '<div class="text-white text-center">참여할 수 있는 방이 없습니다.</div>';
                     return;
                 }
-                roomListEl.innerHTML = snapshot.docs.map(doc => {
+                roomListEl.innerHTML = visibleDocs.map(doc => {
                     const room = doc.data();
                     if (!room.players || !room.host) return '';
                     const playerCount = Object.keys(room.players).length;
@@ -1775,6 +1791,32 @@
         };
 
         // --- 유틸리티 ---
+        function showToast(message) {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.innerHTML = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 2600);
+        }
+
+        // [DEV] 모든 방 삭제(유령방 정리). 개발자 모드에서만 호출됩니다.
+        async function clearAllGhostRooms() {
+            if (!isDevMode) return;
+            try {
+                const snapshot = await getDocs(collection(db, 'rooms'));
+                if (snapshot.empty) { showToast('삭제할 방이 없습니다.'); return; }
+                const batch = writeBatch(db);
+                snapshot.docs.forEach(d => batch.delete(d.ref));
+                await batch.commit();
+                showToast(`${snapshot.size}개의 방을 삭제했습니다.`);
+            } catch (e) {
+                console.error('Failed to clear rooms:', e);
+                showCustomAlert('방 삭제 중 오류가 발생했습니다: ' + e.message);
+            }
+        }
+
         function showCustomAlert(message) {
             document.getElementById('custom-alert-text').innerHTML = message;
             document.getElementById('custom-alert-popup').classList.remove('hidden');
@@ -1811,7 +1853,8 @@
                     y: Math.random() * canvas.height,
                     radius: Math.random() * 1.5,
                     vx: (Math.random() - 0.5) * 0.5,
-                    vy: (Math.random() - 0.5) * 0.5
+                    vy: (Math.random() - 0.5) * 0.5,
+                    color: Math.random() > 0.82 ? '#e6c067' : (Math.random() > 0.5 ? '#7dd3fc' : '#cbd5e1')
                 });
             }
 
@@ -1821,7 +1864,7 @@
 
                 for (let i = 0, x = stars.length; i < x; i++) {
                     const s = stars[i];
-                    ctx.fillStyle = "#1e90ff";
+                    ctx.fillStyle = s.color;
                     ctx.beginPath();
                     ctx.arc(s.x, s.y, s.radius, 0, 2 * Math.PI);
                     ctx.fill();
@@ -2061,6 +2104,18 @@
             isDevMode = urlParams.get('dev') === 'true';
             if (isDevMode) {
                 console.warn("개발자 모드가 활성화되었습니다.");
+                const devClearBtn = document.getElementById('dev-clear-rooms-btn');
+                if (devClearBtn) {
+                    devClearBtn.classList.remove('hidden');
+                    devClearBtn.addEventListener('click', () => {
+                        playSound('click');
+                        showCustomAlertWithHTML(`모든 방을 삭제하시겠습니까? (진행 중인 게임 포함)<br/><br/><div class="flex justify-center gap-4"><button id="dev-confirm-clear" class="btn-primary">예, 전부 삭제</button><button onclick="hideCustomAlert()" class="btn-secondary">취소</button></div>`);
+                        setTimeout(() => {
+                            const c = document.getElementById('dev-confirm-clear');
+                            if (c) c.addEventListener('click', () => { hideCustomAlert(); clearAllGhostRooms(); });
+                        }, 0);
+                    });
+                }
             }
             
             // Firebase 초기화
@@ -2140,17 +2195,39 @@
             document.getElementById('event-log-btn').addEventListener('click', showEventLogPopup);
             document.getElementById('close-event-log-btn').addEventListener('click', hideEventLogPopup);
             document.getElementById('scramble-use-btn').addEventListener('click', handleCardClick);
-            
+
+            // --- 브라우저 종료/새로고침 시 방 정리 (유령 대기방 방지) ---
+            window.addEventListener('beforeunload', () => {
+                if (currentRoomId) {
+                    try {
+                        const roomRef = doc(db, 'rooms', currentRoomId);
+                        if (localPlayer.isHost) {
+                            deleteDoc(roomRef);
+                        } else if (auth.currentUser) {
+                            updateDoc(roomRef, { [`players.${auth.currentUser.uid}`]: deleteField() });
+                        }
+                    } catch (e) { /* best-effort */ }
+                }
+            });
+
             showScreen('nickname-screen');
         };
         
         window.selectCreateMode = (mode) => {
             playSound('click');
+            if (mode === 'chaos') {
+                showCustomAlert('카오스 모드는 아직 개발 중입니다.<br>현재는 클래식 모드만 플레이할 수 있습니다.');
+                return;
+            }
             selectedGameMode = mode;
             showCreateRoomPopup();
         };
         window.selectJoinMode = (mode) => {
             playSound('click');
+            if (mode === 'chaos') {
+                showCustomAlert('카오스 모드는 아직 개발 중입니다.<br>현재는 클래식 모드만 플레이할 수 있습니다.');
+                return;
+            }
             showRoomList(mode);
         };
         window.joinRoom = joinRoom;
@@ -2166,6 +2243,7 @@
         window.submitVote = submitVote;
         window.submitNightAction = submitNightAction;
         window.hideCustomAlert = hideCustomAlert;
+        window.showToast = showToast;
         window.setTotalRounds = async (rounds) => {
             playSound('click');
             if (!currentRoomId || !localPlayer.isHost) return;
@@ -2181,35 +2259,59 @@
     </script>
     <style>
         :root {
-            --bg-color: #0c1427;
+            --bg-color: #070b16;
+            --panel-bg-1: rgba(18, 28, 52, 0.92);
+            --panel-bg-2: rgba(9, 14, 28, 0.94);
             --primary-cyan: #22d3ee;
             --primary-orange: #f97316;
+            --accent-gold: #e6c067;
+            --accent-gold-soft: rgba(230, 192, 103, 0.55);
             --font-title: 'Orbitron', sans-serif;
             --font-body: 'Rajdhani', sans-serif;
         }
-        body { 
-            font-family: var(--font-body); 
+        body {
+            font-family: var(--font-body);
             background-color: var(--bg-color);
+            background-image:
+                radial-gradient(ellipse at 50% -10%, rgba(34, 211, 238, 0.12), transparent 55%),
+                radial-gradient(ellipse at 80% 110%, rgba(230, 192, 103, 0.08), transparent 50%),
+                linear-gradient(180deg, #070b16 0%, #0a1124 50%, #060912 100%);
+            background-attachment: fixed;
             color: #e2e8f0;
         }
         #starfield-bg {
             position: fixed;
             top: 0; left: 0;
             z-index: -1;
-            opacity: 0.5;
+            opacity: 0.45;
         }
         .title-text {
             font-family: var(--font-title);
-            color: var(--primary-cyan);
-            text-shadow: 0 0 5px var(--primary-cyan), 0 0 10px var(--primary-cyan);
+            color: #e8fbff;
+            letter-spacing: 0.04em;
+            text-shadow: 0 0 6px rgba(34, 211, 238, 0.9), 0 0 18px rgba(34, 211, 238, 0.45);
         }
         .screen-panel {
-            background-color: rgba(12, 20, 39, 0.8);
-            backdrop-filter: blur(10px);
-            border: 1px solid var(--primary-cyan);
-            box-shadow: 0 0 20px rgba(34, 211, 238, 0.3), inset 0 0 15px rgba(34, 211, 238, 0.2);
+            position: relative;
+            background-image: linear-gradient(150deg, var(--panel-bg-1), var(--panel-bg-2));
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(34, 211, 238, 0.35);
+            box-shadow:
+                0 18px 50px rgba(0, 0, 0, 0.55),
+                0 0 24px rgba(34, 211, 238, 0.12),
+                inset 0 1px 0 rgba(255, 255, 255, 0.06),
+                inset 0 0 24px rgba(34, 211, 238, 0.06);
             padding: 1rem;
-            border-radius: 1rem;
+            border-radius: 1.1rem;
+        }
+        /* 보드게임 카드 상단의 금색 라인 액센트 */
+        .screen-panel::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 18%; right: 18%;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--accent-gold-soft), transparent);
+            border-radius: 1px;
         }
         @media (min-width: 640px) {
             .screen-panel {
@@ -2217,41 +2319,71 @@
             }
         }
         .screen-panel-item {
-            background-color: rgba(0,0,0,0.3);
+            background-image: linear-gradient(150deg, rgba(20, 30, 54, 0.6), rgba(6, 10, 22, 0.6));
             padding: 1rem;
-            border-radius: 0.5rem;
-            border: 1px solid rgba(34, 211, 238, 0.3);
-            transition: all 0.3s ease;
+            border-radius: 0.65rem;
+            border: 1px solid rgba(34, 211, 238, 0.22);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+            transition: all 0.25s ease;
             cursor: pointer;
         }
         .screen-panel-item:hover {
-            background-color: rgba(34, 211, 238, 0.2);
-            border-color: var(--primary-cyan);
+            background-image: linear-gradient(150deg, rgba(34, 211, 238, 0.18), rgba(20, 30, 54, 0.5));
+            border-color: var(--accent-gold-soft);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 26px rgba(0,0,0,0.45), 0 0 14px rgba(34, 211, 238, 0.18);
+        }
+        /* 비활성(개발 중) 모드 카드 */
+        .mode-disabled { opacity: 0.55; }
+        .mode-disabled:hover {
+            transform: none;
+            border-color: rgba(148, 163, 184, 0.4);
+            background-image: linear-gradient(150deg, rgba(20, 30, 54, 0.6), rgba(6, 10, 22, 0.6));
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+            cursor: not-allowed;
+        }
+        .mode-dev-badge {
+            position: absolute;
+            top: 0.75rem; right: 0.75rem;
+            background: rgba(148, 163, 184, 0.2);
+            color: #cbd5e1;
+            border: 1px solid rgba(148, 163, 184, 0.5);
+            font-size: 0.7rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            padding: 0.15rem 0.55rem;
+            border-radius: 999px;
         }
         .btn-primary {
-            background-color: var(--primary-cyan);
-            color: var(--bg-color);
-            font-weight: bold;
+            background-image: linear-gradient(180deg, #5ff5ff, #22d3ee);
+            color: #06121a;
+            font-weight: 700;
             padding: 0.75rem 1rem;
-            border-radius: 0.5rem;
-            transition: all 0.3s ease;
+            border-radius: 0.6rem;
+            letter-spacing: 0.03em;
+            box-shadow: 0 6px 18px rgba(34, 211, 238, 0.28), inset 0 1px 0 rgba(255,255,255,0.5);
+            transition: all 0.25s ease;
             text-transform: uppercase;
         }
         .btn-primary:hover:not(:disabled) {
-            background-color: #5ff5ff;
-            box-shadow: 0 0 15px #5ff5ff;
+            background-image: linear-gradient(180deg, #7dfbff, #34dcf0);
+            box-shadow: 0 8px 24px rgba(95, 245, 255, 0.5), inset 0 1px 0 rgba(255,255,255,0.6);
+            transform: translateY(-1px);
         }
         .btn-secondary {
-            background-color: transparent;
+            background-color: rgba(34, 211, 238, 0.04);
             color: var(--primary-cyan);
-            border: 1px solid var(--primary-cyan);
-            font-weight: bold;
+            border: 1px solid rgba(34, 211, 238, 0.55);
+            font-weight: 700;
             padding: 0.75rem 1rem;
-            border-radius: 0.5rem;
-            transition: all 0.3s ease;
+            border-radius: 0.6rem;
+            letter-spacing: 0.03em;
+            transition: all 0.25s ease;
         }
         .btn-secondary:hover {
-            background-color: rgba(34, 211, 238, 0.2);
+            background-color: rgba(34, 211, 238, 0.16);
+            border-color: var(--accent-gold-soft);
+            box-shadow: 0 0 14px rgba(34, 211, 238, 0.25);
         }
         #vote-targets button.bg-cyan-500 {
             border: 2px solid #67e8f9;
@@ -2299,6 +2431,100 @@
             34% { transform: scaleX(1) translateX(0); }
             100% { transform: scaleX(1); }
         }
+
+        /* ============================================================
+           모바일 대응 & 앱 같은 사용자 경험(UX) 개선
+           ============================================================ */
+
+        /* 탭 하이라이트 제거 + 더블탭 확대 방지(앱 같은 터치감) */
+        * { -webkit-tap-highlight-color: transparent; }
+        html { -webkit-text-size-adjust: 100%; }
+        body { touch-action: manipulation; overflow-x: hidden; }
+
+        /* 버튼/선택 요소는 텍스트 선택 방지 + 누를 때 살짝 눌리는 피드백 */
+        button, .screen-panel-item, [onclick] {
+            -webkit-user-select: none; user-select: none;
+        }
+        button:active:not(:disabled),
+        .btn-primary:active:not(:disabled),
+        .btn-secondary:active:not(:disabled) {
+            transform: scale(0.97);
+        }
+
+        /* 화면 전환 시 부드러운 페이드/슬라이드 인 */
+        .screen:not(.hidden) {
+            animation: screen-in 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        @keyframes screen-in {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* 팝업/오버레이는 항상 화면 전체를 덮도록 fixed 고정 + 스크롤 가능 */
+        .popup-overlay {
+            position: fixed !important;
+            inset: 0 !important;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            padding: 1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .popup-panel {
+            max-height: 90vh;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            width: 100%;
+        }
+
+        /* 모바일 전용 미세 조정 */
+        @media (max-width: 640px) {
+            #app-container { padding: 0.75rem; padding-top: 1.25rem; padding-bottom: 5rem; }
+            .title-text { letter-spacing: 0.02em; }
+            .screen-panel { border-radius: 0.9rem; }
+            /* 게임 보드 칩이 너무 작아지지 않도록 최소 높이 보장 */
+            #game-main-content { grid-template-columns: 1fr !important; }
+            /* 하단 고정 영역이 콘텐츠를 가리지 않도록 여유 */
+            #game-screen { padding-bottom: 1rem; }
+        }
+
+        /* 커스텀 스크롤바(앱 느낌) */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(34, 211, 238, 0.35);
+            border-radius: 999px;
+        }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(34, 211, 238, 0.6); }
+
+        /* 토스트(가벼운 비차단 알림) */
+        #toast-container {
+            position: fixed;
+            left: 50%;
+            bottom: max(1.5rem, env(safe-area-inset-bottom));
+            transform: translateX(-50%);
+            z-index: 200;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            align-items: center;
+            pointer-events: none;
+            width: max-content;
+            max-width: 90vw;
+        }
+        .toast {
+            background-image: linear-gradient(150deg, rgba(18,28,52,0.96), rgba(9,14,28,0.96));
+            border: 1px solid rgba(34, 211, 238, 0.45);
+            color: #e8fbff;
+            padding: 0.7rem 1.1rem;
+            border-radius: 0.7rem;
+            font-weight: 600;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            animation: toast-in 0.25s ease, toast-out 0.3s ease forwards 2.2s;
+        }
+        @keyframes toast-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes toast-out { to { opacity: 0; transform: translateY(12px); } }
     </style>
 </head>
 <body class="bg-gray-900">
@@ -2314,11 +2540,11 @@
                     입력 완료
                 </button>
             </div>
-             <p class="text-center text-gray-600 mt-4 text-sm font-orbitron">aeon ver 1.18</p>
+             <p class="text-center text-gray-600 mt-4 text-sm font-orbitron">aeon ver 1.21</p>
         </div>
         <div id="main-menu-screen" class="screen hidden w-full max-w-md">
             <div class="screen-panel text-center">
-                 <h1 class="title-text text-4xl sm:text-5xl font-bold text-center mb-8">QUANTUM MAFIA</h1>
+                 <h1 class="title-text text-4xl sm:text-5xl font-bold text-center mb-8">AEON INVASION</h1>
                  <div class="space-y-4">
                       <button id="create-room-btn" class="w-full btn-primary text-xl sm:text-2xl py-3 sm:py-4">
                            게임방 만들기
@@ -2327,6 +2553,7 @@
                            게임방 참가
                       </button>
                       <button id="rulebook-btn-main" class="w-full btn-secondary text-lg sm:text-xl py-2 sm:py-3">게임 룰북</button>
+                      <button id="dev-clear-rooms-btn" class="hidden w-full bg-red-700/80 hover:bg-red-600 text-white font-bold py-2 rounded-lg text-sm">[DEV] 유령방 전체 삭제</button>
                  </div>
             </div>
         </div>
@@ -2338,7 +2565,8 @@
                        <h3 class="font-bold text-2xl text-cyan-300 font-orbitron">클래식 모드</h3>
                        <p class="text-gray-400 mt-2">특별한 이벤트 없이, 플레이어들의 순수한 추리와 심리전으로 진행되는 기본 모드입니다.</p>
                    </div>
-                   <div class="screen-panel-item text-left" onclick="selectCreateMode('chaos')">
+                   <div class="screen-panel-item mode-disabled text-left relative" onclick="selectCreateMode('chaos')">
+                       <span class="mode-dev-badge">개발 중</span>
                        <h3 class="font-bold text-2xl text-cyan-300 font-orbitron">카오스 모드</h3>
                        <p class="text-gray-400 mt-2">모든 플레이어가 특수 능력 카드를 받고 시작하여 게임에 새로운 변수를 추가하는 모드입니다.</p>
                    </div>
@@ -2353,7 +2581,8 @@
                    <div class="screen-panel-item text-left" onclick="selectJoinMode('classic')">
                        <h3 class="font-bold text-2xl text-cyan-300 font-orbitron">클래식 모드</h3>
                    </div>
-                   <div class="screen-panel-item text-left" onclick="selectJoinMode('chaos')">
+                   <div class="screen-panel-item mode-disabled text-left relative" onclick="selectJoinMode('chaos')">
+                       <span class="mode-dev-badge">개발 중</span>
                        <h3 class="font-bold text-2xl text-cyan-300 font-orbitron">카오스 모드</h3>
                    </div>
                  </div>
@@ -2386,7 +2615,7 @@
                         <p class="text-gray-400">방 ID</p>
                         <div class="flex items-center">
                             <span id="lobby-room-id" class="text-xl md:text-2xl font-bold text-yellow-400 tracking-widest">...</span>
-                            <button onclick="navigator.clipboard.writeText(document.getElementById('lobby-room-id').innerText); showCustomAlert('방 ID가 복사되었습니다.')" class="ml-2 p-1 text-gray-400 hover:text-white">
+                            <button onclick="navigator.clipboard.writeText(document.getElementById('lobby-room-id').innerText); showToast('📋 방 ID가 복사되었습니다.')" class="ml-2 p-1 text-gray-400 hover:text-white">
                                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-clipboard-copy"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
                             </button>
                         </div>
@@ -2633,6 +2862,9 @@
         <div id="phase-transition-overlay" class="hidden absolute inset-0 bg-black/90 flex items-center justify-center z-[103] pointer-events-none">
             <p id="phase-transition-text" class="title-text text-3xl animate-pulse-slow"></p>
         </div>
+
+        <!-- 토스트(가벼운 알림) 컨테이너 -->
+        <div id="toast-container"></div>
 
         <!-- 카드 사용 효과 오버레이 -->
         <div id="card-effect-overlay" class="hidden absolute inset-0 bg-black/90 flex-col items-center justify-center z-[104] pointer-events-none">
