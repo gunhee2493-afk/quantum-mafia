@@ -29,6 +29,7 @@
         let myInitialRoleForReveal = null;
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
+        const APP_VERSION = 'v1.22 · 2026-06-27'; // 배포 버전 확인용(개발자 모드에서 모서리에 표시)
 
         // --- 카드 정의 ---
         const abilityCardDeck = {
@@ -2296,6 +2297,8 @@
             isDevMode = urlParams.get('dev') === 'true';
             if (isDevMode) {
                 console.warn("개발자 모드가 활성화되었습니다.");
+                const vb = document.getElementById('version-badge');
+                if (vb) { vb.textContent = APP_VERSION + ' · DEV'; vb.classList.remove('hidden'); }
                 const devClearBtn = document.getElementById('dev-clear-rooms-btn');
                 if (devClearBtn) {
                     devClearBtn.classList.remove('hidden');
@@ -2780,6 +2783,23 @@
         }
         @keyframes toast-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes toast-out { to { opacity: 0; transform: translateY(12px); } }
+
+        /* 개발자 모드 버전 표시(모서리에 은은하게) */
+        #version-badge {
+            position: fixed;
+            right: 6px;
+            bottom: 4px;
+            z-index: 300;
+            font-family: var(--font-title);
+            font-size: 10px;
+            letter-spacing: 0.06em;
+            color: rgba(148, 163, 184, 0.55);
+            background: rgba(0, 0, 0, 0.25);
+            padding: 1px 6px;
+            border-radius: 6px;
+            pointer-events: none;
+            user-select: none;
+        }
     </style>
 </head>
 <body class="bg-gray-900">
@@ -3144,6 +3164,9 @@
 
         <!-- 토스트(가벼운 알림) 컨테이너 -->
         <div id="toast-container"></div>
+
+        <!-- 배포 버전 표시(개발자 모드에서만 모서리에 살짝) -->
+        <div id="version-badge" class="hidden"></div>
 
         <!-- 카드 사용 효과 오버레이 -->
         <div id="card-effect-overlay" class="hidden absolute inset-0 bg-black/90 flex-col items-center justify-center z-[104] pointer-events-none">
