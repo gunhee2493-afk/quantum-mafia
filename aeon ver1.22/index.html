@@ -13,7 +13,7 @@
         // Firebase SDK
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, onSnapshot, updateDoc, collection, serverTimestamp, runTransaction, deleteDoc, getDocs, query, where, writeBatch, deleteField, arrayUnion } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, initializeFirestore, doc, getDoc, setDoc, onSnapshot, updateDoc, collection, serverTimestamp, runTransaction, deleteDoc, getDocs, query, where, writeBatch, deleteField, arrayUnion } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- 전역 변수 및 설정 ---
         let db, auth;
@@ -27,6 +27,8 @@
         let actingBotId = null;
         let selectedGameMode = 'classic';
         let myInitialRoleForReveal = null;
+        let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
+        let isProceeding = false;    // 단계 진행 중복 실행 방지 락
 
         // --- 카드 정의 ---
         const abilityCardDeck = {
@@ -317,12 +319,19 @@
             localPlayer.isHost = false;
             currentRoomData = null;
             actingBotId = null;
+            activeTimerEndAt = null;
+            isProceeding = false;
+            clearDayNightTheme();
+            document.getElementById('night-overlay').classList.remove('active');
+            stopBgm();
         }
 
         function subscribeToRoom(roomId) {
-            const roomRef = doc(db, 'rooms', roomId); 
+            const roomRef = doc(db, 'rooms', roomId);
             if (roomUnsubscribe) roomUnsubscribe();
             roomUnsubscribe = onSnapshot(roomRef, (doc) => {
+              // 렌더링 중 예외가 나도 리스너/화면이 영구히 멈추지 않도록 전체를 보호
+              try {
                 if (doc.exists()) {
                     const oldRoomData = currentRoomData;
                     currentRoomData = doc.data();
@@ -393,10 +402,25 @@
                     showCustomAlert('호스트가 방을 떠나 메인 화면으로 돌아갑니다.');
                     showScreen('main-menu-screen');
                 }
+              } catch (err) {
+                console.error("스냅샷 처리 중 오류(무시하고 다음 업데이트로 복구):", err);
+              }
+            }, (error) => {
+                // 연결이 끊겨 리스너가 종료된 경우: 같은 방에 있으면 잠시 후 자동 재연결
+                console.error("방 구독 오류:", error);
+                if (currentRoomId === roomId) {
+                    showToast('🔄 연결이 끊겨 재연결 중...');
+                    setTimeout(() => {
+                        if (currentRoomId === roomId) subscribeToRoom(roomId);
+                    }, 2500);
+                }
             });
         }
         
         function updateLobbyUI(room) {
+            clearDayNightTheme();
+            document.getElementById('night-overlay').classList.remove('active');
+            stopBgm();
             const { host, players, minPlayers, maxPlayers, totalRounds, gameMode } = room;
             if (!players) return;
             const playerList = Object.values(players).sort((a, b) => a.number - b.number);
@@ -596,7 +620,8 @@
                         players: updatedPlayers,
                         gameState: {
                             phase: 'DAY', round: 1, subPhase: 'DISCUSSION',
-                            timer: 300, 
+                            timer: 300,
+                            timerEndAt: Date.now() + 300 * 1000,
                             message: "첫번째 낮입니다. 치료할 사람을 토론하세요.",
                             isPlayerActing: false
                         },
@@ -621,6 +646,8 @@
             }
 
             document.getElementById('night-overlay').classList.toggle('active', gameState.phase === 'NIGHT');
+            applyDayNightTheme(gameState.phase);
+            if (!bgm.muted) setBgmMode(gameState.phase);
             const currentScreen = document.querySelector('.screen:not(.hidden)')?.id;
             let targetScreen = 'game-screen';
 
@@ -670,7 +697,7 @@
             if (gameState.subPhase === 'DISCUSSION') subPhaseText = '토론';
             else if (gameState.subPhase === 'VOTE') subPhaseText = '투표';
             else if (gameState.subPhase === 'ACTION') subPhaseText = '행동';
-            const phaseText = `<span class="text-sm sm:text-base">${gameState.round} / ${totalRounds || 4} 라운드</span><br>${gameState.phase === 'DAY' ? '낮' : '밤'} / ${subPhaseText}`;
+            const phaseText = `<span class="text-sm sm:text-base">${gameState.round} / ${totalRounds || 4} 라운드</span><br><span class="phase-badge">${gameState.phase === 'DAY' ? '☀️ 낮' : '🌙 밤'}</span>/ ${subPhaseText}`;
             document.getElementById('hud-phase').innerHTML = phaseText;
             
             let myRoleText = "과학자";
@@ -754,7 +781,7 @@
             if (gameState.subPhase === 'DISCUSSION') subPhaseText = '토론';
             else if (gameState.subPhase === 'VOTE') subPhaseText = '투표';
             else if (gameState.subPhase === 'ACTION') subPhaseText = '행동';
-            const phaseText = `<span class="text-sm sm:text-base">${gameState.round} / ${totalRounds || 4} 라운드</span><br>${gameState.phase === 'DAY' ? '낮' : '밤'} / ${subPhaseText}`;
+            const phaseText = `<span class="text-sm sm:text-base">${gameState.round} / ${totalRounds || 4} 라운드</span><br><span class="phase-badge">${gameState.phase === 'DAY' ? '☀️ 낮' : '🌙 밤'}</span>/ ${subPhaseText}`;
             document.getElementById('hud-phase').innerHTML = phaseText;
             document.getElementById('hud-role').innerHTML = `<span>관전 모드</span>`;
             updateTimer(room);
@@ -857,72 +884,88 @@
                 hostSkipBtn.classList.add('hidden');
             }
             
-            if (gameState.subPhase === 'DISCUSSION') {
+            // 토론뿐 아니라 투표·행동 단계도 제한시간을 둬서, 누군가 이탈해도 자동으로 진행되게 함
+            if (['DISCUSSION', 'VOTE', 'ACTION'].includes(gameState.subPhase)) {
                 timerEl.classList.remove('hidden');
-                if(gameTimerInterval) clearInterval(gameTimerInterval);
-                let timer = gameState.timer;
-                const totalTime = gameState.timer;
+                const totalTime = gameState.timer || 300;
+                // 절대 종료 시각 기준. 문서에 timerEndAt이 있으면 그 값을, 없으면(구버전 호환) 현재로부터 계산
+                const endAt = gameState.timerEndAt || (Date.now() + totalTime * 1000);
+
+                // 이미 같은 단계의 카운트다운이 돌고 있으면 다시 시작하지 않음(스냅샷 리셋 방지)
+                if (activeTimerEndAt === endAt && gameTimerInterval) return;
+                activeTimerEndAt = endAt;
+                if (gameTimerInterval) clearInterval(gameTimerInterval);
+
                 const timerBar = document.getElementById('timer-bar-inner');
                 const timerText = document.getElementById('timer-text');
-                
-                const updateDisplay = () => {
-                    const percentage = Math.max(0, (timer / totalTime) * 100);
+                let tickedSound = false;
+
+                const tick = () => {
+                    const remaining = Math.round((endAt - Date.now()) / 1000);
+                    const percentage = Math.max(0, Math.min(100, (remaining / totalTime) * 100));
                     timerBar.style.width = `${percentage}%`;
-                    timerText.innerText = Math.max(0, timer);
-                    if (timer <= 10) {
+                    timerText.innerText = Math.max(0, remaining);
+                    if (remaining <= 10) {
                         timerBar.classList.remove('bg-cyan-400');
                         timerBar.classList.add('bg-red-500');
+                        if (!tickedSound && remaining > 0) { playSound('timerTick'); tickedSound = true; }
                     } else {
                         timerBar.classList.remove('bg-red-500');
                         timerBar.classList.add('bg-cyan-400');
                     }
-                };
-                
-                updateDisplay();
-
-                gameTimerInterval = setInterval(() => {
-                    timer--;
-                    updateDisplay();
-                    if (timer === 10) playSound('timerTick');
-
-                    if (timer < 0) {
+                    if (remaining < 0) {
                         clearInterval(gameTimerInterval);
+                        gameTimerInterval = null;
+                        activeTimerEndAt = null;
                         if (localPlayer.isHost) hostProceedPhase();
                     }
-                }, 1000);
+                };
+
+                tick();
+                gameTimerInterval = setInterval(tick, 1000);
             } else {
+                activeTimerEndAt = null;
                 timerEl.classList.add('hidden');
-                if(gameTimerInterval) clearInterval(gameTimerInterval);
+                if(gameTimerInterval) { clearInterval(gameTimerInterval); gameTimerInterval = null; }
             }
         }
 
         async function hostProceedPhase() {
             if (!currentRoomId || !localPlayer.isHost) return;
-            
+
+            // 중복 실행 방지: 타이머 만료/결과팝업/버튼 클릭이 겹쳐 단계가 두 번 넘어가는 것을 막음
+            if (isProceeding) return;
+
             if (currentRoomData.gameState.isPlayerActing) {
                 showCustomAlert('현재 다른 플레이어가 능력 카드를 사용 중입니다. 잠시만 기다려주세요.');
                 return;
             }
 
-            const roomRef = doc(db, 'rooms', currentRoomId); 
-            const roomDocForPhase = await getDoc(roomRef);
-            if (!roomDocForPhase.exists()) return;
-            const currentSubPhase = roomDocForPhase.data().gameState.subPhase;
+            isProceeding = true;
+            try {
+                const roomRef = doc(db, 'rooms', currentRoomId);
+                const roomDocForPhase = await getDoc(roomRef);
+                if (!roomDocForPhase.exists()) { isProceeding = false; return; }
+                const currentSubPhase = roomDocForPhase.data().gameState.subPhase;
 
-            let transitionMessage = null;
-            if (currentSubPhase === 'DAY_RESULT') {
-                transitionMessage = "ENTERING NIGHT PROTOCOL...";
-            } else if (currentSubPhase === 'NIGHT_RESULT') {
-                transitionMessage = "SYSTEM REBOOTING FOR DAY CYCLE...";
-            }
+                let transitionMessage = null;
+                if (currentSubPhase === 'DAY_RESULT') {
+                    transitionMessage = "ENTERING NIGHT PROTOCOL...";
+                } else if (currentSubPhase === 'NIGHT_RESULT') {
+                    transitionMessage = "SYSTEM REBOOTING FOR DAY CYCLE...";
+                }
 
-            if(transitionMessage) {
-                await updateDoc(roomRef, { 'gameState.transitionMessage': transitionMessage });
-                setTimeout(() => {
-                    runPhaseLogic(roomRef);
-                }, 3000); // 3초 후 실제 로직 실행
-            } else {
-                runPhaseLogic(roomRef);
+                if (transitionMessage) {
+                    await updateDoc(roomRef, { 'gameState.transitionMessage': transitionMessage });
+                    setTimeout(() => {
+                        runPhaseLogic(roomRef); // 락은 runPhaseLogic 내부에서 해제
+                    }, 3000); // 3초 후 실제 로직 실행
+                } else {
+                    await runPhaseLogic(roomRef); // 락은 runPhaseLogic 내부에서 해제
+                }
+            } catch (e) {
+                console.error("hostProceedPhase 오류:", e);
+                isProceeding = false;
             }
         }
 
@@ -972,6 +1015,8 @@
                     if (gameState.phase === 'DAY') {
                         if (gameState.subPhase === 'DISCUSSION') {
                             newGameState.subPhase = 'VOTE';
+                            newGameState.timer = 90;
+                            newGameState.timerEndAt = Date.now() + 90 * 1000;
                             newGameState.message = "치료제를 투여할 사람을 선택하세요.";
                             delete newGameState.revoteCandidates;
                         } else if (gameState.subPhase === 'VOTE') {
@@ -1006,6 +1051,8 @@
                             }
                         } else if (gameState.subPhase === 'DAY_TIEBREAKER_ANNOUNCEMENT') {
                             newGameState.subPhase = 'VOTE';
+                            newGameState.timer = 90;
+                            newGameState.timerEndAt = Date.now() + 90 * 1000;
                             newGameState.message = `최다 득표자가 ${gameState.revoteCandidates.length}명입니다. 다시 한번 투표해주세요.`;
                         } else if (gameState.subPhase === 'DAY_RESULT') {
                             
@@ -1025,6 +1072,7 @@
                             newGameState.phase = 'NIGHT';
                             newGameState.subPhase = 'DISCUSSION';
                             newGameState.timer = 300;
+                            newGameState.timerEndAt = Date.now() + 300 * 1000;
                             newGameState.message = "밤입니다. 감염 및 보호 대상을 토론하세요.";
                             delete newGameState.revoteCandidates;
                             delete newGameState.lastVoteResult;
@@ -1032,6 +1080,8 @@
                     } else if (gameState.phase === 'NIGHT') {
                         if (gameState.subPhase === 'DISCUSSION') {
                              newGameState.subPhase = 'ACTION';
+                             newGameState.timer = 90;
+                             newGameState.timerEndAt = Date.now() + 90 * 1000;
                              newGameState.message = "능력을 사용할 대상을 선택하세요.";
                         } else if (gameState.subPhase === 'ACTION') {
                             let results = { successfulInfections: [], successfulProtections: [], failedInfections: [] };
@@ -1066,8 +1116,9 @@
                                                     }
                                                 }
                                             } else {
-                                                results.successfulInfections.push({ attackerId: p.id, targetId: targetId }); // 로그는 중복 기록될 수 있음
                                                 const targetPlayer = newPlayers[targetId];
+                                                if (!targetPlayer) continue; // 대상이 방을 나간 경우 건너뜀(정산 멈춤 방지)
+                                                results.successfulInfections.push({ attackerId: p.id, targetId: targetId }); // 로그는 중복 기록될 수 있음
                                                 const targetState = targetPlayer.quantumState;
                                                 const citizenIndex = targetState.indexOf('CITIZEN');
                                                 if (citizenIndex > -1) {
@@ -1084,13 +1135,15 @@
                                 // *** NEW LOGIC END ***
                             });
                             
-                            const traceUsers = Object.keys(players).filter(pid => players[pid].abilityCard === 'info_trace' && cardActions[pid]);
+                            // 나간 플레이어를 참조해도 정산이 멈추지 않도록 안전하게 이름 조회
+                            const nm = (id) => players[id]?.nickname || '(나간 플레이어)';
+                            const traceUsers = Object.keys(players).filter(pid => players[pid]?.abilityCard === 'info_trace' && cardActions[pid]);
                             if (traceUsers.length > 0) {
                                 let report = "밤 사이 활동 결과:<br>";
                                 let activity = false;
-                                if (results.successfulProtections.length > 0) { activity = true; report += results.successfulProtections.map(p => `🛡️ ${players[p.protectorId].nickname} 님이 ${players[p.targetId].nickname} 님을 보호했습니다.`).join('<br>'); }
-                                if (results.failedInfections.length > 0) { activity = true; report += '<br>' + results.failedInfections.map(f => `💥 ${players[f.attackerId].nickname} 님의 감염 시도가 ${players[f.protectorId] ? players[f.protectorId].nickname + ' 님의 보호로' : '방화벽에 의해'} 실패했습니다 (대상: ${players[f.targetId].nickname}).`).join('<br>');}
-                                if (results.successfulInfections.length > 0) { activity = true; report += '<br>' + results.successfulInfections.map(i => `💀 ${players[i.attackerId].nickname} 님이 ${players[i.targetId].nickname} 님을 감염시켰습니다.`).join('<br>');}
+                                if (results.successfulProtections.length > 0) { activity = true; report += results.successfulProtections.map(p => `🛡️ ${nm(p.protectorId)} 님이 ${nm(p.targetId)} 님을 보호했습니다.`).join('<br>'); }
+                                if (results.failedInfections.length > 0) { activity = true; report += '<br>' + results.failedInfections.map(f => `💥 ${nm(f.attackerId)} 님의 감염 시도가 ${players[f.protectorId] ? nm(f.protectorId) + ' 님의 보호로' : '방화벽에 의해'} 실패했습니다 (대상: ${nm(f.targetId)}).`).join('<br>');}
+                                if (results.successfulInfections.length > 0) { activity = true; report += '<br>' + results.successfulInfections.map(i => `💀 ${nm(i.attackerId)} 님이 ${nm(i.targetId)} 님을 감염시켰습니다.`).join('<br>');}
                                 if(isFirewallActive && results.failedInfections.length > 0 && !results.successfulProtections.length > 0) { activity = true; report += '<br>🛡️ 방화벽에 의해 모든 감염이 막혔습니다.'; }
                                 if (!activity) { report += "아무 일도 일어나지 않았습니다."; }
                                 traceUsers.forEach(userId => {
@@ -1101,8 +1154,8 @@
                             newGameState.subPhase = 'NIGHT_RESULT';
                             newGameState.lastNightResults = results;
                             
-                            if (results.successfulProtections.length > 0) newLogEntries.push({round: gameState.round, phase: '밤', hostText: `${results.successfulProtections.map(p => players[p.protectorId].nickname).join(', ')}가 백신을 사용했습니다.`, playerText: `누군가 백신으로 감염을 막았습니다.`});
-                            if (results.successfulInfections.length > 0) newLogEntries.push({round: gameState.round, phase: '밤', hostText: `${results.successfulInfections.map(i => players[i.targetId].nickname).join(', ')}이(가) 감염되었습니다.`, playerText: `밤 사이 누군가 감염되었습니다.`});
+                            if (results.successfulProtections.length > 0) newLogEntries.push({round: gameState.round, phase: '밤', hostText: `${results.successfulProtections.map(p => nm(p.protectorId)).join(', ')}가 백신을 사용했습니다.`, playerText: `누군가 백신으로 감염을 막았습니다.`});
+                            if (results.successfulInfections.length > 0) newLogEntries.push({round: gameState.round, phase: '밤', hostText: `${results.successfulInfections.map(i => nm(i.targetId)).join(', ')}이(가) 감염되었습니다.`, playerText: `밤 사이 누군가 감염되었습니다.`});
                             if(isFirewallActive) newLogEntries.push({round: gameState.round, phase: '밤', hostText: `방화벽이 감염을 막았습니다.`, playerText: `방화벽이 감염을 막았습니다.`});
                             if (results.successfulInfections.length === 0 && results.successfulProtections.length === 0 && !isFirewallActive) newLogEntries.push({round: gameState.round, phase: '밤', hostText: `아무 일도 일어나지 않았습니다.`, playerText: `아무 일도 일어나지 않았습니다.`});
                             
@@ -1123,6 +1176,7 @@
                                 newGameState.phase = 'DAY';
                                 newGameState.subPhase = 'DISCUSSION';
                                 newGameState.timer = 300;
+                                newGameState.timerEndAt = Date.now() + 300 * 1000;
                                 newGameState.message = `${newGameState.round}번째 낮입니다. 치료할 사람을 토론하세요.`;
                             }
                             delete newGameState.isFirewallActive; // 밤이 끝나면 방화벽 효과 제거
@@ -1142,6 +1196,8 @@
             } catch(e) {
                 console.error("Error proceeding phase: ", e);
                 showCustomAlert("다음 단계를 진행하는 중 오류가 발생했습니다.");
+            } finally {
+                isProceeding = false; // 단계 진행 락 해제
             }
         }
 
@@ -1257,16 +1313,17 @@
                  
                  const { successfulInfections, successfulProtections, failedInfections } = gameState.lastNightResults;
                  let detailsHTML = '';
-                 
+                 const nm = (id) => players[id]?.nickname || '(나간 플레이어)';
+
                  if (localPlayer.isHost) {
                       successfulProtections.forEach(p => {
-                           detailsHTML += `<div class="flex items-center justify-center text-green-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-shield-check mr-2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="m9 12 2 2 4-4"/></svg> ${players[p.protectorId].nickname} → ${players[p.targetId].nickname} 보호 성공.</div>`;
+                           detailsHTML += `<div class="flex items-center justify-center text-green-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-shield-check mr-2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="m9 12 2 2 4-4"/></svg> ${nm(p.protectorId)} → ${nm(p.targetId)} 보호 성공.</div>`;
                       });
                       failedInfections.forEach(f => {
-                           detailsHTML += `<div class="flex items-center justify-center text-yellow-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-shield-off mr-2"><path d="M19.69 14a6.9 6.9 0 0 0-9.38-9.38"/><path d="M4 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><line x1="2" x2="22" y1="2" y2="22"/></svg> ${players[f.attackerId].nickname} → ${players[f.targetId].nickname} 감염 실패.</div>`;
+                           detailsHTML += `<div class="flex items-center justify-center text-yellow-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-shield-off mr-2"><path d="M19.69 14a6.9 6.9 0 0 0-9.38-9.38"/><path d="M4 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><line x1="2" x2="22" y1="2" y2="22"/></svg> ${nm(f.attackerId)} → ${nm(f.targetId)} 감염 실패.</div>`;
                       });
                       successfulInfections.forEach(i => {
-                           detailsHTML += `<div class="flex items-center justify-center text-red-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-virus mr-2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="m8 8 1.41-1.41"/><path d="M14.59 9.41 16 8"/><path d="m8 16 1.41 1.41"/><path d="M14.59 14.59 16 16"/><path d="M12 8v8"/><path d="m9.41 14.59 1.41-1.41"/><path d="m16 14.59-1.41-1.41"/><path d="m9.41 9.41 1.41 1.41"/></svg> ${players[i.attackerId].nickname} → ${players[i.targetId].nickname} 감염 성공.</div>`;
+                           detailsHTML += `<div class="flex items-center justify-center text-red-400"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-virus mr-2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="m8 8 1.41-1.41"/><path d="M14.59 9.41 16 8"/><path d="m8 16 1.41 1.41"/><path d="M14.59 14.59 16 16"/><path d="M12 8v8"/><path d="m9.41 14.59 1.41-1.41"/><path d="m16 14.59-1.41-1.41"/><path d="m9.41 9.41 1.41 1.41"/></svg> ${nm(i.attackerId)} → ${nm(i.targetId)} 감염 성공.</div>`;
                       });
                  } else {
                        if (successfulProtections.length > 0) detailsHTML += `<p class="text-green-400">누군가 백신으로 감염을 막았습니다.</p>`;
@@ -1402,30 +1459,54 @@
             document.getElementById('vote-popup').classList.add('hidden');
         }
 
+        // 쓰기 경합(동시 접속 많을 때)으로 실패하면 자동 재시도하는 헬퍼
+        async function updateDocWithRetry(ref, updates, attempts = 4) {
+            for (let i = 0; i < attempts; i++) {
+                try {
+                    await updateDoc(ref, updates);
+                    return true;
+                } catch (e) {
+                    console.warn(`updateDoc 실패(시도 ${i + 1}/${attempts}):`, e);
+                    if (i === attempts - 1) throw e;
+                    // 점점 늘어나는 대기 + 약간의 무작위(지터)로 경합 분산
+                    await new Promise(r => setTimeout(r, 250 * (i + 1) + Math.random() * 200));
+                }
+            }
+        }
+
         async function submitVote(targetIds) {
             if (!currentRoomId || targetIds.length === 0) return;
-            const roomRef = doc(db, 'rooms', currentRoomId); 
+            const roomRef = doc(db, 'rooms', currentRoomId);
             const actorId = actingBotId || localPlayer.id;
-            await updateDoc(roomRef, { [`votes.${actorId}`]: targetIds[0] });
-            hideActionPopup();
-            actingBotId = null;
+            try {
+                await updateDocWithRetry(roomRef, { [`votes.${actorId}`]: targetIds[0] });
+                hideActionPopup();
+            } catch (e) {
+                console.error("투표 제출 실패:", e);
+                showCustomAlert('투표 전송에 실패했습니다. 잠시 후 다시 시도해주세요.');
+            } finally {
+                actingBotId = null;
+            }
         }
         async function submitNightAction(targetIds) {
             if (!currentRoomId) return;
             if (!Array.isArray(targetIds)) targetIds = [targetIds];
-            
-            const roomRef = doc(db, 'rooms', currentRoomId); 
+
+            const roomRef = doc(db, 'rooms', currentRoomId);
             const actorId = actingBotId || localPlayer.id;
 
             const updates = {};
             updates[`nightActions.${actorId}`] = { targetIds: targetIds };
 
-            const me = currentRoomData.players[actorId];
-            // '분열 변종' 삭제, '잠재된 힘' 로직은 밤 행동 처리에서 적용
-
-            await updateDoc(roomRef, updates);
-            hideActionPopup();
-            actingBotId = null;
+            try {
+                await updateDocWithRetry(roomRef, updates);
+                hideActionPopup();
+            } catch (e) {
+                console.error("밤 행동 제출 실패:", e);
+                showCustomAlert('행동 전송에 실패했습니다. 잠시 후 다시 시도해주세요.');
+            } finally {
+                actingBotId = null;
+            }
         }
 
         // --- 게임 종료 ---
@@ -1801,6 +1882,117 @@
             setTimeout(() => toast.remove(), 2600);
         }
 
+        // ===== 추리 메모 (방별로 브라우저에 저장, 나만 볼 수 있음) =====
+        function getMemoKey() { return 'aeon_memo_' + (currentRoomId || 'global'); }
+        function showMemoPopup() {
+            playSound('popupOpen');
+            const ta = document.getElementById('memo-textarea');
+            ta.value = localStorage.getItem(getMemoKey()) || '';
+            document.getElementById('memo-popup').classList.remove('hidden');
+            ta.focus();
+        }
+        function hideMemoPopup() {
+            playSound('click');
+            document.getElementById('memo-popup').classList.add('hidden');
+        }
+        let memoSaveTimer = null;
+        function saveMemo() {
+            clearTimeout(memoSaveTimer);
+            memoSaveTimer = setTimeout(() => {
+                try { localStorage.setItem(getMemoKey(), document.getElementById('memo-textarea').value); } catch (e) {}
+                const hint = document.getElementById('memo-saved-hint');
+                if (hint) {
+                    hint.style.opacity = '1';
+                    setTimeout(() => { hint.style.opacity = '0'; }, 1200);
+                }
+            }, 350);
+        }
+        function clearMemo() {
+            document.getElementById('memo-textarea').value = '';
+            try { localStorage.removeItem(getMemoKey()); } catch (e) {}
+            showToast('메모를 비웠습니다.');
+        }
+
+        // ===== 낮/밤 테마 (어둡게 하지 않고 색/배지로 구분) =====
+        function applyDayNightTheme(phase) {
+            const isNight = phase === 'NIGHT';
+            document.body.classList.toggle('phase-night', isNight);
+            document.body.classList.toggle('phase-day', !isNight && (phase === 'DAY'));
+        }
+        function clearDayNightTheme() {
+            document.body.classList.remove('phase-day', 'phase-night');
+        }
+
+        // ===== 간단한 배경음악 (BGM) — Tone.js Transport 기반 =====
+        let bgm = { synth: null, loop: null, started: false, muted: false, mode: null };
+        const BGM_PATTERNS = {
+            DAY:   { tempo: 82, notes: [['C4','E4','G4'], ['D4','F4','A4'], ['E4','G4','B4'], ['D4','F4','A4']] },
+            NIGHT: { tempo: 58, notes: [['A3','C4','E4'], ['F3','A3','C4'], ['G3','B3','D4'], ['E3','G3','B3']] }
+        };
+        function initBgm() {
+            if (bgm.synth) return;
+            try {
+                const reverb = new Tone.Reverb({ decay: 4, wet: 0.35 }).toDestination();
+                bgm.synth = new Tone.PolySynth(Tone.Synth, {
+                    oscillator: { type: 'sine' },
+                    envelope: { attack: 0.7, decay: 0.5, sustain: 0.4, release: 2.2 }
+                }).connect(reverb);
+                bgm.synth.volume.value = -26; // 은은하게
+            } catch (e) { console.error('BGM init 실패:', e); }
+        }
+        function startBgm() {
+            initBgm();
+            if (!bgm.synth) return;
+            try {
+                if (Tone.context.state !== 'running') Tone.context.resume();
+                const pattern = BGM_PATTERNS[bgm.mode || 'DAY'];
+                Tone.Transport.bpm.value = pattern.tempo;
+                if (bgm.loop) { bgm.loop.dispose(); bgm.loop = null; }
+                let i = 0;
+                bgm.loop = new Tone.Loop((time) => {
+                    const chord = pattern.notes[i % pattern.notes.length];
+                    bgm.synth.triggerAttackRelease(chord, '2n', time);
+                    i++;
+                }, '2n').start(0);
+                if (Tone.Transport.state !== 'started') Tone.Transport.start();
+                bgm.started = true;
+            } catch (e) { console.error('BGM start 실패:', e); }
+        }
+        function stopBgm() {
+            try {
+                if (bgm.loop) { bgm.loop.dispose(); bgm.loop = null; }
+                if (Tone.Transport.state === 'started') Tone.Transport.stop();
+            } catch (e) {}
+            bgm.started = false;
+        }
+        // 낮/밤에 맞춰 BGM 분위기 전환
+        function setBgmMode(phase) {
+            const mode = phase === 'NIGHT' ? 'NIGHT' : 'DAY';
+            if (bgm.muted) { bgm.mode = mode; return; }
+            if (bgm.mode === mode && bgm.started) return;
+            bgm.mode = mode;
+            startBgm();
+        }
+        function toggleBgm() {
+            bgm.muted = !bgm.muted;
+            try { localStorage.setItem('aeon_bgm_muted', bgm.muted ? '1' : '0'); } catch (e) {}
+            if (bgm.muted) {
+                stopBgm();
+                showToast('🔇 배경음악 꺼짐');
+            } else {
+                setBgmMode(currentRoomData?.gameState?.phase || 'DAY');
+                showToast('🔊 배경음악 켜짐');
+            }
+            updateBgmIcon();
+        }
+        function updateBgmIcon() {
+            const on = document.getElementById('bgm-icon-on');
+            const off = document.getElementById('bgm-icon-off');
+            if (!on || !off) return;
+            on.classList.toggle('hidden', bgm.muted);
+            off.classList.toggle('hidden', !bgm.muted);
+        }
+
         // [DEV] 모든 방 삭제(유령방 정리). 개발자 모드에서만 호출됩니다.
         async function clearAllGhostRooms() {
             if (!isDevMode) return;
@@ -2138,7 +2330,13 @@
                 }
 
                 const app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
+                // 모바일/프록시 환경에서 실시간 연결이 끊기는 현상을 줄이기 위해 롱폴링 자동 감지 사용
+                try {
+                    db = initializeFirestore(app, { experimentalAutoDetectLongPolling: true });
+                } catch (e) {
+                    console.warn("initializeFirestore 실패, 기본값 사용:", e);
+                    db = getFirestore(app);
+                }
                 auth = getAuth(app);
                 
                 onAuthStateChanged(auth, async (user) => {
@@ -2195,6 +2393,17 @@
             document.getElementById('event-log-btn').addEventListener('click', showEventLogPopup);
             document.getElementById('close-event-log-btn').addEventListener('click', hideEventLogPopup);
             document.getElementById('scramble-use-btn').addEventListener('click', handleCardClick);
+
+            // 추리 메모
+            document.getElementById('memo-btn').addEventListener('click', showMemoPopup);
+            document.getElementById('close-memo-btn').addEventListener('click', hideMemoPopup);
+            document.getElementById('memo-clear-btn').addEventListener('click', clearMemo);
+            document.getElementById('memo-textarea').addEventListener('input', saveMemo);
+
+            // 배경음악(BGM) 토글 + 저장된 음소거 설정 불러오기
+            bgm.muted = (localStorage.getItem('aeon_bgm_muted') === '1');
+            updateBgmIcon();
+            document.getElementById('bgm-toggle-btn').addEventListener('click', toggleBgm);
 
             // --- 브라우저 종료/새로고침 시 방 정리 (유령 대기방 방지) ---
             window.addEventListener('beforeunload', () => {
@@ -2395,17 +2604,63 @@
         .animate-pulse-slow { animation: pulse-slow 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
         @keyframes pulse-slow { 50% { opacity: .7; } }
         #observation-player-list:not(.measurement-ready) button { display: none; }
+        /* 밤: 화면을 어둡게 깔지 않고, 가장자리만 은은한 비네트로 '밤 느낌'만 줌 */
         #night-overlay {
             position: fixed;
             inset: 0;
-            background-color: rgba(12, 20, 39, 0.7);
+            background:
+                radial-gradient(ellipse at 50% 40%, transparent 45%, rgba(10, 14, 38, 0.45) 100%);
             z-index: 10;
             pointer-events: none;
             opacity: 0;
-            transition: opacity 1s ease-in-out;
+            transition: opacity 1.2s ease-in-out;
         }
-        #night-overlay.active {
+        #night-overlay.active { opacity: 1; }
+
+        /* 낮/밤을 색으로 확실히 구분하는 상단 띠(글로우 포함) */
+        #phase-edge {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            height: 5px;
+            z-index: 60;
+            pointer-events: none;
+            transition: background 1s ease, box-shadow 1s ease, opacity 0.6s ease;
+            opacity: 0;
+        }
+        body.phase-day #phase-edge {
             opacity: 1;
+            background: linear-gradient(90deg, #f59e0b, #fcd34d, #f59e0b);
+            box-shadow: 0 0 18px 2px rgba(245, 158, 11, 0.65);
+        }
+        body.phase-night #phase-edge {
+            opacity: 1;
+            background: linear-gradient(90deg, #4338ca, #818cf8, #4338ca);
+            box-shadow: 0 0 18px 2px rgba(99, 102, 241, 0.7);
+        }
+        /* 밤에는 배경 별빛을 차갑게, 낮에는 따뜻하게 미세 보정 */
+        body.phase-night { background-color: #05070f; }
+        body.phase-night #starfield-bg { opacity: 0.7; }
+        body.phase-day #starfield-bg { opacity: 0.3; }
+
+        /* HUD 단계 표시 칩(낮/밤 강조) */
+        #hud-phase .phase-badge {
+            display: inline-block;
+            padding: 0.1rem 0.6rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            vertical-align: middle;
+            margin-right: 0.35rem;
+            border: 1px solid transparent;
+        }
+        body.phase-day #hud-phase .phase-badge {
+            background: rgba(245, 158, 11, 0.18);
+            border-color: rgba(245, 158, 11, 0.6);
+            color: #fcd34d;
+        }
+        body.phase-night #hud-phase .phase-badge {
+            background: rgba(99, 102, 241, 0.18);
+            border-color: rgba(129, 140, 248, 0.6);
+            color: #c7d2fe;
         }
         .popup-overlay {
             background-color: rgba(0,0,0,0.2);
@@ -2530,6 +2785,7 @@
 <body class="bg-gray-900">
     <canvas id="starfield-bg"></canvas>
     <div id="night-overlay"></div>
+    <div id="phase-edge"></div>
     <div id="app-container" class="min-h-screen flex justify-center p-4 sm:p-6 pt-10 sm:pt-16 pb-20 relative">
         <div id="nickname-screen" class="screen w-full max-w-md">
             <div class="screen-panel">
@@ -2648,6 +2904,10 @@
                 <div id="hud-phase" class="text-lg sm:text-2xl font-bold text-yellow-400 font-orbitron text-center"></div>
                 <div class="flex items-center space-x-2 sm:space-x-4">
                     <div id="hud-role" class="flex items-center space-x-2 text-cyan-400 text-sm sm:text-base"></div>
+                    <button id="bgm-toggle-btn" class="text-gray-400 hover:text-white transition" title="배경음악 켜기/끄기">
+                        <svg id="bgm-icon-on" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-volume-2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+                        <svg id="bgm-icon-off" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-volume-x hidden"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="22" x2="16" y1="9" y2="15"/><line x1="16" x2="22" y1="9" y2="15"/></svg>
+                    </button>
                     <button id="rulebook-btn-game" class="text-gray-400 hover:text-white transition">
                         <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-book-open-text"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/><path d="M6 8h2"/><path d="M6 12h2"/><path d="M16 8h2"/><path d="M16 12h2"/></svg>
                     </button>
@@ -2673,6 +2933,9 @@
             </div>
              <button id="event-log-btn" class="absolute bottom-4 right-4 text-gray-400 hover:text-white transition">
                 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-scroll-text"><path d="M8 21h12a2 2 0 0 0 2-2v-2H10v2a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v3h10"/><path d="M19 17V5a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12"/><path d="M15 8h2"/><path d="M15 12h2"/><path d="M7 8h2"/><path d="M7 12h2"/></svg>
+             </button>
+             <button id="memo-btn" class="absolute bottom-4 left-4 text-yellow-300/80 hover:text-yellow-200 transition" title="추리 메모">
+                <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-notebook-pen"><path d="M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4"/><path d="M2 6h4"/><path d="M2 10h4"/><path d="M2 14h4"/><path d="M2 18h4"/><path d="M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z"/></svg>
              </button>
         </div>
         <div id="observation-screen" class="screen hidden w-full max-w-4xl text-center screen-panel">
@@ -2843,6 +3106,22 @@
                  </button>
                 <h2 class="title-text text-3xl font-bold text-center mb-4 flex-shrink-0">사건 기록</h2>
                 <div id="event-log-content" class="flex-grow overflow-y-auto pr-4 text-lg space-y-3">
+                </div>
+            </div>
+        </div>
+
+        <!-- 추리 메모 팝업 -->
+        <div id="memo-popup" class="hidden absolute inset-0 bg-black/60 flex items-center justify-center z-[100] p-4 popup-overlay">
+            <div class="screen-panel w-full max-w-lg h-[70vh] flex flex-col relative popup-panel">
+                <button id="close-memo-btn" class="absolute top-4 right-4 text-gray-400 hover:text-white z-10">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
+                <h2 class="title-text text-2xl font-bold text-center mb-1 flex-shrink-0">추리 메모</h2>
+                <p class="text-center text-gray-400 text-sm mb-3 flex-shrink-0">나만 보이는 메모입니다. 자동 저장돼요.</p>
+                <textarea id="memo-textarea" class="flex-grow w-full bg-gray-900/60 text-white p-3 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-cyan-500 border border-cyan-500/40 text-base leading-relaxed" placeholder="예) 3번 김OO — 밤마다 침묵, 의심&#10;5번 이OO — 백신 개발자 주장&#10;..."></textarea>
+                <div class="flex justify-between items-center mt-2 flex-shrink-0">
+                    <span id="memo-saved-hint" class="text-xs text-green-400 opacity-0 transition-opacity">저장됨 ✓</span>
+                    <button id="memo-clear-btn" class="btn-secondary text-sm py-1 px-3">메모 비우기</button>
                 </div>
             </div>
         </div>
