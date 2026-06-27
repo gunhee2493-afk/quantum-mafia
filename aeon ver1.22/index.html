@@ -30,6 +30,9 @@
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
         const APP_VERSION = 'v1.22 · 2026-06-27'; // 배포 버전 확인용(개발자 모드에서 모서리에 표시)
+        let submittedActionToken = null; // 이번 단계에 투표/행동을 보냈는지 추적(반영 안 되면 다시 안내)
+        // 단계를 구분하는 토큰(라운드·낮밤·서브단계·종료시각이 바뀌면 새 단계)
+        function phaseToken(gs) { return gs ? `${gs.round}|${gs.phase}|${gs.subPhase}|${gs.timerEndAt || ''}` : ''; }
 
         // --- 카드 정의 ---
         const abilityCardDeck = {
@@ -322,6 +325,7 @@
             actingBotId = null;
             activeTimerEndAt = null;
             isProceeding = false;
+            submittedActionToken = null;
             clearDayNightTheme();
             document.getElementById('night-overlay').classList.remove('active');
             stopBgm();
@@ -1221,8 +1225,14 @@
                     showActionPopup("낮 토론", gameState.message, true);
                 } else if (subPhase === 'VOTE') {
                     if (votes[localPlayer.id]) {
+                        submittedActionToken = null;
                         showActionPopup("투표 완료", "다른 플레이어의 투표를 기다립니다...", false);
                     } else {
+                        // 이번 단계에 투표를 보냈는데도 기록이 없으면 = 전송 누락 → 다시 투표 안내
+                        if (submittedActionToken === phaseToken(gameState)) {
+                            submittedActionToken = null;
+                            showToast('⚠️ 투표가 반영되지 않았어요. 다시 선택해주세요.');
+                        }
                         let voteTargets;
                         if (gameState.revoteCandidates && gameState.revoteCandidates.length > 0) {
                             voteTargets = Object.values(players).filter(p => p.isAlive && gameState.revoteCandidates.includes(p.id));
@@ -1237,10 +1247,16 @@
                     showActionPopup("밤 토론", gameState.message, true);
                  } else if (subPhase === 'ACTION') {
                     if (nightActions[localPlayer.id]) {
+                         submittedActionToken = null;
                          showActionPopup("밤 행동 완료", "다른 플레이어의 선택을 기다립니다...", false);
                     } else if (me.currentRole === 'CITIZEN') {
                         submitNightAction([]);
                     } else {
+                        // 행동을 보냈는데 기록이 없으면 = 전송 누락 → 다시 선택 안내
+                        if (submittedActionToken === phaseToken(gameState)) {
+                            submittedActionToken = null;
+                            showToast('⚠️ 행동이 반영되지 않았어요. 다시 선택해주세요.');
+                        }
                         // *** BUG FIX START: 개발자/에이온 능력 강화 로직 수정 ***
                         let maxTargets = 1;
                         let title, desc, actionTargets;
@@ -1481,6 +1497,7 @@
             const actorId = actingBotId || localPlayer.id;
             try {
                 await updateDocWithRetry(roomRef, { [`votes.${actorId}`]: targetIds[0] });
+                if (actorId === localPlayer.id) submittedActionToken = phaseToken(currentRoomData?.gameState);
                 hideActionPopup();
             } catch (e) {
                 console.error("투표 제출 실패:", e);
@@ -1501,6 +1518,7 @@
 
             try {
                 await updateDocWithRetry(roomRef, updates);
+                if (actorId === localPlayer.id) submittedActionToken = phaseToken(currentRoomData?.gameState);
                 hideActionPopup();
             } catch (e) {
                 console.error("밤 행동 제출 실패:", e);
