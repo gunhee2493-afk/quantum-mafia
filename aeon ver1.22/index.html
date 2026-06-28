@@ -29,7 +29,7 @@
         let myInitialRoleForReveal = null;
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
-        const APP_VERSION = 'v1.22 · 2026-06-28 · intro-admin'; // 배포 버전 확인용(개발자 모드에서 모서리에 표시)
+        const APP_VERSION = 'v1.22 · 2026-06-28 · chaos-fix'; // 배포 버전 확인용(개발자 모드에서 모서리에 표시)
         let submittedActionToken = null; // 이번 단계에 투표/행동을 보냈는지 추적(반영 안 되면 다시 안내)
         // 단계를 구분하는 토큰(라운드·낮밤·서브단계·종료시각이 바뀌면 새 단계)
         function phaseToken(gs) { return gs ? `${gs.round}|${gs.phase}|${gs.subPhase}|${gs.timerEndAt || ''}` : ''; }
@@ -988,6 +988,7 @@
                     let newPlayers = JSON.parse(JSON.stringify(players));
                     let newLogEntries = [];
                     let newCardActionResults = {...room.cardActionResults};
+                    let newEntangledPairs = room.entangledPairs ? [...room.entangledPairs] : []; // 루트에 보관되는 얽힘 쌍
 
                     if (gameState.phase === 'DAY' && gameState.subPhase === 'DISCUSSION') {
                         if (room.gameMode === 'chaos' && cardActions && Object.keys(cardActions).length > 0) {
@@ -995,6 +996,9 @@
                             newPlayers = effectResults.players;
                             newCardActionResults = {...newCardActionResults, ...effectResults.cardActionResults};
                             newGameState = {...newGameState, ...effectResults.gameState};
+                            if (effectResults.entangledPairs && effectResults.entangledPairs.length) {
+                                newEntangledPairs = [...newEntangledPairs, ...effectResults.entangledPairs];
+                            }
                         }
                     }
 
@@ -1142,7 +1146,8 @@
                             
                             // 나간 플레이어를 참조해도 정산이 멈추지 않도록 안전하게 이름 조회
                             const nm = (id) => players[id]?.nickname || '(나간 플레이어)';
-                            const traceUsers = Object.keys(players).filter(pid => players[pid]?.abilityCard === 'info_trace' && cardActions[pid]);
+                            // [암호 해독기] 낮에 예약해 둔 사용자(gameState.pendingTraceUsers)에게 밤 결과 보고
+                            const traceUsers = (newGameState.pendingTraceUsers || []).filter(pid => players[pid]);
                             if (traceUsers.length > 0) {
                                 let report = "밤 사이 활동 결과:<br>";
                                 let activity = false;
@@ -1155,7 +1160,8 @@
                                     newCardActionResults[userId] = { cardId: 'info_trace', details: report };
                                 });
                             }
-                            
+                            delete newGameState.pendingTraceUsers; // 이번 밤 보고 완료 → 예약 해제
+
                             newGameState.subPhase = 'NIGHT_RESULT';
                             newGameState.lastNightResults = results;
                             
@@ -1188,13 +1194,14 @@
                         }
                     }
                     
-                    transaction.update(roomRef, { 
-                        gameState: newGameState, 
-                        players: newPlayers, 
-                        votes: {}, 
+                    transaction.update(roomRef, {
+                        gameState: newGameState,
+                        players: newPlayers,
+                        votes: {},
                         nightActions: {},
                         cardActions: {},
                         cardActionResults: newCardActionResults,
+                        entangledPairs: newEntangledPairs,
                         eventLog: [...(eventLog || []), ...newLogEntries]
                     });
                 });
@@ -2104,6 +2111,7 @@
         function applyCardEffects(cardActions, players, gameState, logEntries) {
             const cardActionResults = {};
             let newGameState = {...gameState};
+            const entangledAdditions = []; // 이번에 새로 생긴 얽힘 쌍(루트 entangledPairs에 합쳐짐)
 
             for(const playerId in cardActions) {
                 const action = cardActions[playerId];
@@ -2123,7 +2131,9 @@
                         logEntries.push({round: gameState.round, phase: '낮', hostText: `${user.nickname}님이 [하이젠베르크 관측기] 카드를 사용했습니다.`, playerText: `${user.nickname}님이 능력 카드를 사용했습니다.`});
                         break;
                     case 'info_trace':
-                        cardActionResults[playerId] = { cardId: action.cardId, details: null };
+                        // 밤 정산이 끝난 뒤 결과 보고를 받을 사람을 지속적으로 표시(cardActions는 곧 비워지므로 gameState에 보관)
+                        if (!newGameState.pendingTraceUsers) newGameState.pendingTraceUsers = [];
+                        if (!newGameState.pendingTraceUsers.includes(playerId)) newGameState.pendingTraceUsers.push(playerId);
                         logEntries.push({round: gameState.round, phase: '낮', hostText: `${user.nickname}님이 [암호 해독기] 카드를 사용했습니다.`, playerText: `${user.nickname}님이 능력 카드를 사용했습니다.`});
                         break;
                     case 'state_infect':
@@ -2146,8 +2156,7 @@
                         break;
                     case 'rule_spooky_action':
                         if (target) {
-                            if (!newGameState.entangledPairs) newGameState.entangledPairs = [];
-                            newGameState.entangledPairs.push([playerId, targetId]);
+                            entangledAdditions.push([playerId, targetId]);
                              logEntries.push({round: gameState.round, phase: '낮', hostText: `${user.nickname}님과 ${target.nickname}님이 [유령 같은 원격 작용] 상태가 되었습니다.`, playerText: `${user.nickname}님과 ${target.nickname}님이 [유령 같은 원격 작용] 상태가 되었습니다.`});
                         }
                         break;
@@ -2157,7 +2166,7 @@
                         break;
                 }
             }
-            return { players, cardActionResults, gameState: newGameState };
+            return { players, cardActionResults, gameState: newGameState, entangledPairs: entangledAdditions };
         }
 
 
@@ -2172,6 +2181,11 @@
                 const actorId = actingBotId || localPlayer.id;
                 const me = currentRoomData.players[actorId];
                 return gameState.phase === 'END' && me.finalRole;
+            }
+
+            // 토론 카드는 효과가 '낮 토론' 종료 시에만 적용되므로 낮 토론에서만 사용 가능
+            if (card.timing === 'DISCUSSION') {
+                return gameState.phase === 'DAY' && gameState.subPhase === 'DISCUSSION';
             }
 
             return card.timing === gameState.subPhase;
@@ -2546,7 +2560,7 @@
         
         window.selectCreateMode = (mode) => {
             playSound('click');
-            if (mode === 'chaos') {
+            if (mode === 'chaos' && !isDevMode) {
                 showCustomAlert('카오스 모드는 아직 개발 중입니다.<br>현재는 클래식 모드만 플레이할 수 있습니다.');
                 return;
             }
@@ -2555,7 +2569,7 @@
         };
         window.selectJoinMode = (mode) => {
             playSound('click');
-            if (mode === 'chaos') {
+            if (mode === 'chaos' && !isDevMode) {
                 showCustomAlert('카오스 모드는 아직 개발 중입니다.<br>현재는 클래식 모드만 플레이할 수 있습니다.');
                 return;
             }
