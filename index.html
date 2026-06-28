@@ -29,7 +29,8 @@
         let myInitialRoleForReveal = null;
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
-        const APP_VERSION = 'v1.22 · 2026-06-28 · chaos-fix'; // 배포 버전 확인용(개발자 모드에서 모서리에 표시)
+        let observationResultTimer = null; // 측정 완료 후 결과 공개 예약 타이머(중복/경쟁 방지)
+        const APP_VERSION = 'v1.22 · 2026-06-28 · chaos-fix2'; // 배포 버전 확인용(개발자 모드에서 모서리에 표시)
         let submittedActionToken = null; // 이번 단계에 투표/행동을 보냈는지 추적(반영 안 되면 다시 안내)
         // 단계를 구분하는 토큰(라운드·낮밤·서브단계·종료시각이 바뀌면 새 단계)
         function phaseToken(gs) { return gs ? `${gs.round}|${gs.phase}|${gs.subPhase}|${gs.timerEndAt || ''}` : ''; }
@@ -326,6 +327,7 @@
             activeTimerEndAt = null;
             isProceeding = false;
             submittedActionToken = null;
+            if (observationResultTimer) { clearTimeout(observationResultTimer); observationResultTimer = null; }
             clearDayNightTheme();
             document.getElementById('night-overlay').classList.remove('active');
             stopBgm();
@@ -922,7 +924,7 @@
                         clearInterval(gameTimerInterval);
                         gameTimerInterval = null;
                         activeTimerEndAt = null;
-                        if (localPlayer.isHost) hostProceedPhase();
+                        if (localPlayer.isHost) hostProceedPhase(true); // 자동 진행(막히면 내부에서 재시도)
                     }
                 };
 
@@ -935,15 +937,22 @@
             }
         }
 
-        async function hostProceedPhase() {
+        async function hostProceedPhase(silent = false) {
             if (!currentRoomId || !localPlayer.isHost) return;
 
             // 중복 실행 방지: 타이머 만료/결과팝업/버튼 클릭이 겹쳐 단계가 두 번 넘어가는 것을 막음
             if (isProceeding) return;
 
             if (currentRoomData.gameState.isPlayerActing) {
-                showCustomAlert('현재 다른 플레이어가 능력 카드를 사용 중입니다. 잠시만 기다려주세요.');
-                return;
+                // 카드 사용 시작 후 25초가 지나도록 안 끝나면 접속이 끊긴 것으로 보고 강제 진행(교착 방지)
+                const since = currentRoomData.gameState.actingSince || 0;
+                if (Date.now() - since < 25000) {
+                    if (!silent) showCustomAlert('현재 다른 플레이어가 능력 카드를 사용 중입니다. 잠시만 기다려주세요.');
+                    // 자동 진행(타이머 만료) 맥락이면, 락이 풀릴 때까지 조용히 재시도
+                    else setTimeout(() => hostProceedPhase(true), 3000);
+                    return;
+                }
+                console.warn('카드 사용 락이 25초 이상 지속되어 강제 해제하고 진행합니다.');
             }
 
             isProceeding = true;
@@ -985,6 +994,8 @@
                     let { gameState, players, votes, nightActions, eventLog, cardActions } = room;
                     let newGameState = { ...gameState };
                     delete newGameState.transitionMessage;
+                    newGameState.isPlayerActing = false; // 단계가 넘어가면 카드 사용 락은 항상 해제(교착 방지)
+                    delete newGameState.actingSince;
                     let newPlayers = JSON.parse(JSON.stringify(players));
                     let newLogEntries = [];
                     let newCardActionResults = {...room.cardActionResults};
@@ -1020,6 +1031,12 @@
                             });
                         }
                     };
+
+                    // 카드로 상태판이 바뀌면(낮 토론) 모든 플레이어의 역할을 즉시 재계산
+                    // (그래야 데이터 오염/복구·하이젠베르크 등으로 에이온/개발자가 된 사람이 그날 밤 제대로 행동함)
+                    if (gameState.phase === 'DAY' && gameState.subPhase === 'DISCUSSION' && room.gameMode === 'chaos') {
+                        Object.values(newPlayers).forEach(p => checkAndApplyRoleChange(p));
+                    }
 
                     if (gameState.phase === 'DAY') {
                         if (gameState.subPhase === 'DISCUSSION') {
@@ -1604,11 +1621,14 @@
 
             const allMeasured = Object.values(players).filter(p => p.isAlive).every(p => p.finalRole);
             if(allMeasured) {
-                if(localPlayer.isHost) {
+                if(localPlayer.isHost && !observationResultTimer) {
                     timerText.innerText = "5초 후 결과를 공개합니다...";
-                    setTimeout(() => {
-                        const roomRef = doc(db, 'rooms', currentRoomId); 
-                        updateDoc(roomRef, { 'gameState.subPhase': 'RESULT' });
+                    observationResultTimer = setTimeout(() => {
+                        observationResultTimer = null;
+                        const roomRef = doc(db, 'rooms', currentRoomId);
+                        // 아인슈타인 재측정 등으로 그 사이 누군가 미측정 상태가 됐으면 공개하지 않음
+                        const stillAll = currentRoomData && Object.values(currentRoomData.players).filter(p => p.isAlive).every(p => p.finalRole);
+                        if (stillAll) updateDoc(roomRef, { 'gameState.subPhase': 'RESULT' });
                     }, 5000);
                 }
                 return;
@@ -2211,7 +2231,7 @@
                 return;
             }
             const roomRef = doc(db, 'rooms', currentRoomId); 
-            await updateDoc(roomRef, { 'gameState.isPlayerActing': true });
+            await updateDoc(roomRef, { 'gameState.isPlayerActing': true, 'gameState.actingSince': Date.now() });
 
             const actor = currentRoomData.players[actorId];
             const card = abilityCardDeck[actor.abilityCard];
