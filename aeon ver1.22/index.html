@@ -29,7 +29,7 @@
         let myInitialRoleForReveal = null;
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
-        const APP_VERSION = 'v1.22 · 2026-06-27 · intro'; // 배포 버전 확인용(개발자 모드에서 모서리에 표시)
+        const APP_VERSION = 'v1.22 · 2026-06-28 · intro-admin'; // 배포 버전 확인용(개발자 모드에서 모서리에 표시)
         let submittedActionToken = null; // 이번 단계에 투표/행동을 보냈는지 추적(반영 안 되면 다시 안내)
         // 단계를 구분하는 토큰(라운드·낮밤·서브단계·종료시각이 바뀌면 새 단계)
         function phaseToken(gs) { return gs ? `${gs.round}|${gs.phase}|${gs.subPhase}|${gs.timerEndAt || ''}` : ''; }
@@ -2355,6 +2355,49 @@
             }
         }
 
+        // ===== [DEV] 인트로 이미지 관리(Firestore config/intro 직접 편집) =====
+        async function showIntroAdmin() {
+            playSound('popupOpen');
+            const ta = document.getElementById('intro-urls');
+            const iv = document.getElementById('intro-interval');
+            document.getElementById('intro-admin-popup').classList.remove('hidden');
+            ta.value = '불러오는 중...';
+            try {
+                const snap = await getDoc(doc(db, 'config', 'intro'));
+                if (snap.exists()) {
+                    const d = snap.data();
+                    ta.value = Array.isArray(d.images) ? d.images.join('\n') : '';
+                    iv.value = Number(d.intervalSec) || 5;
+                } else {
+                    ta.value = '';
+                    iv.value = 5;
+                }
+            } catch (e) {
+                ta.value = '';
+                showCustomAlert('현재 설정을 불러오지 못했습니다: ' + e.message);
+            }
+        }
+        function hideIntroAdmin() {
+            playSound('click');
+            document.getElementById('intro-admin-popup').classList.add('hidden');
+        }
+        async function saveIntroConfig() {
+            playSound('click');
+            const urls = document.getElementById('intro-urls').value
+                .split('\n').map(s => s.trim()).filter(Boolean);
+            const intervalSec = Math.max(2, Number(document.getElementById('intro-interval').value) || 5);
+            try {
+                await setDoc(doc(db, 'config', 'intro'), { images: urls, intervalSec }, { merge: true });
+                const hint = document.getElementById('intro-admin-hint');
+                if (hint) { hint.style.opacity = '1'; setTimeout(() => { hint.style.opacity = '0'; }, 1500); }
+                showToast(`💾 저장됨 (이미지 ${urls.length}장). 첫 화면에 반영됩니다.`);
+                loadIntroSlideshow(); // 즉시 반영
+            } catch (e) {
+                console.error('인트로 설정 저장 실패:', e);
+                showCustomAlert('저장 실패: ' + e.message + '<br>(Firestore 쓰기 권한을 확인하세요)');
+            }
+        }
+
         // --- 초기화 및 전역 할당 ---
         window.onload = () => {
             initializeSounds();
@@ -2367,6 +2410,13 @@
                 console.warn("개발자 모드가 활성화되었습니다.");
                 const vb = document.getElementById('version-badge');
                 if (vb) { vb.textContent = APP_VERSION + ' · DEV'; vb.classList.remove('hidden'); }
+                const devIntroBtn = document.getElementById('dev-intro-btn');
+                if (devIntroBtn) {
+                    devIntroBtn.classList.remove('hidden');
+                    devIntroBtn.addEventListener('click', showIntroAdmin);
+                }
+                document.getElementById('intro-save-btn')?.addEventListener('click', saveIntroConfig);
+                document.getElementById('close-intro-admin-btn')?.addEventListener('click', hideIntroAdmin);
                 const devClearBtn = document.getElementById('dev-clear-rooms-btn');
                 if (devClearBtn) {
                     devClearBtn.classList.remove('hidden');
@@ -2922,6 +2972,7 @@
                       </button>
                       <button id="rulebook-btn-main" class="w-full btn-secondary text-lg sm:text-xl py-2 sm:py-3">게임 룰북</button>
                       <button id="dev-clear-rooms-btn" class="hidden w-full bg-red-700/80 hover:bg-red-600 text-white font-bold py-2 rounded-lg text-sm">[DEV] 유령방 전체 삭제</button>
+                      <button id="dev-intro-btn" class="hidden w-full bg-indigo-700/80 hover:bg-indigo-600 text-white font-bold py-2 rounded-lg text-sm">[DEV] 인트로 이미지 관리</button>
                  </div>
             </div>
         </div>
@@ -3234,6 +3285,25 @@
                 <div class="flex justify-between items-center mt-2 flex-shrink-0">
                     <span id="memo-saved-hint" class="text-xs text-green-400 opacity-0 transition-opacity">저장됨 ✓</span>
                     <button id="memo-clear-btn" class="btn-secondary text-sm py-1 px-3">메모 비우기</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- [DEV] 인트로 이미지 관리 팝업 -->
+        <div id="intro-admin-popup" class="hidden absolute inset-0 bg-black/60 flex items-center justify-center z-[101] p-4 popup-overlay">
+            <div class="screen-panel w-full max-w-lg flex flex-col relative popup-panel">
+                <button id="close-intro-admin-btn" class="absolute top-4 right-4 text-gray-400 hover:text-white z-10">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
+                <h2 class="title-text text-2xl font-bold text-center mb-1">인트로 이미지 관리</h2>
+                <p class="text-center text-gray-400 text-sm mb-3">이미지 URL을 <b>한 줄에 하나씩</b> 붙여넣으세요. 저장하면 첫 화면에 즉시 반영됩니다.</p>
+                <textarea id="intro-urls" rows="6" class="w-full bg-gray-900/60 text-white p-3 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-cyan-500 border border-cyan-500/40 text-sm leading-relaxed" placeholder="https://.../1.jpg&#10;https://.../2.jpg&#10;https://.../3.jpg"></textarea>
+                <div class="flex items-center gap-2 mt-3">
+                    <label class="text-sm text-gray-300">전환 간격(초)</label>
+                    <input id="intro-interval" type="number" min="2" value="5" class="w-20 bg-gray-900/60 text-white p-2 rounded-lg text-center border border-cyan-500/40 focus:outline-none focus:ring-2 focus:ring-cyan-500">
+                    <span id="intro-admin-hint" class="text-xs text-green-400 opacity-0 transition-opacity ml-2">저장됨 ✓</span>
+                    <div class="flex-grow"></div>
+                    <button id="intro-save-btn" class="btn-primary text-sm py-2 px-5">저장</button>
                 </div>
             </div>
         </div>
