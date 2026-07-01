@@ -30,7 +30,7 @@
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
         let observationResultTimer = null; // 측정 완료 후 결과 공개 예약 타이머(중복/경쟁 방지)
-        const APP_VERSION = 'v1.24 · 2026-06-28 · dice-tap'; // 배포 버전 확인용(개발자 모드에서 모서리에 표시)
+        const APP_VERSION = 'v1.25 · 2026-06-28 · roomstatus'; // 배포 버전 확인용(개발자 모드에서 모서리에 표시)
         let submittedActionToken = null; // 이번 단계에 투표/행동을 보냈는지 추적(반영 안 되면 다시 안내)
         // 단계를 구분하는 토큰(라운드·낮밤·서브단계·종료시각이 바뀌면 새 단계)
         function phaseToken(gs) { return gs ? `${gs.round}|${gs.phase}|${gs.subPhase}|${gs.timerEndAt || ''}` : ''; }
@@ -206,7 +206,8 @@
 
             if (roomListUnsubscribe) roomListUnsubscribe();
 
-            const q = query(collection(db, 'rooms'), where("status", "==", "waiting"), where("gameMode", "==", gameMode)); 
+            // 대기중·진행중 방을 모두 표시(상태 필터 제거 → 단일 필드 쿼리라 인덱스도 불필요)
+            const q = query(collection(db, 'rooms'), where("gameMode", "==", gameMode));
             roomListUnsubscribe = onSnapshot(q, (snapshot) => {
                 // --- 유령 대기방 자동 정리: 생성된 지 30분이 지난 빈(참가자 0명) 대기방 삭제 ---
                 const STALE_MS = 30 * 60 * 1000;
@@ -216,7 +217,7 @@
                     if (!room || !room.host) return false;
                     const playerCount = room.players ? Object.keys(room.players).length : 0;
                     const createdMs = room.createdAt?.toMillis ? room.createdAt.toMillis() : null;
-                    const isStale = playerCount === 0 && createdMs !== null && (now - createdMs) > STALE_MS;
+                    const isStale = room.status === 'waiting' && playerCount === 0 && createdMs !== null && (now - createdMs) > STALE_MS;
                     if (isStale) {
                         deleteDoc(doc(db, 'rooms', d.id)).catch(e => console.error("Stale room cleanup failed:", e));
                         return false;
@@ -225,22 +226,60 @@
                 });
 
                 if (visibleDocs.length === 0) {
-                    roomListEl.innerHTML = '<div class="text-white text-center">참여할 수 있는 방이 없습니다.</div>';
+                    roomListEl.innerHTML = '<div class="text-white text-center">표시할 방이 없습니다.</div>';
                     return;
                 }
-                roomListEl.innerHTML = visibleDocs.map(doc => {
-                    const room = doc.data();
+                // 대기중 방을 위로 정렬
+                visibleDocs.sort((a, b) => {
+                    const wa = a.data().status === 'waiting' ? 0 : 1;
+                    const wb = b.data().status === 'waiting' ? 0 : 1;
+                    return wa - wb;
+                });
+                roomListEl.innerHTML = visibleDocs.map(docSnap => {
+                    const room = docSnap.data();
                     if (!room.players || !room.host) return '';
                     const playerCount = Object.keys(room.players).length;
+                    const maxP = room.maxPlayers || 12;
+                    const isWaiting = room.status === 'waiting';
+                    const isFull = playerCount >= maxP;
+                    const joinable = isWaiting && !isFull;
+
+                    // 상태/라운드 배지
+                    let statusBadge, roundBadge = '';
+                    if (isWaiting) {
+                        statusBadge = `<span class="text-xs font-bold px-2 py-1 rounded-full bg-green-500/20 text-green-300 border border-green-500/50">🟢 대기중</span>`;
+                    } else {
+                        statusBadge = `<span class="text-xs font-bold px-2 py-1 rounded-full bg-orange-500/20 text-orange-300 border border-orange-500/50">🔴 진행중</span>`;
+                        const gs = room.gameState;
+                        if (gs) {
+                            if (gs.phase === 'END') {
+                                roundBadge = `<span class="text-xs text-purple-300">최종 측정 중</span>`;
+                            } else {
+                                const phaseIcon = gs.phase === 'DAY' ? '🌞' : '🌚';
+                                roundBadge = `<span class="text-xs text-orange-200">${phaseIcon} ${gs.round || 1}/${room.totalRounds || 4} 라운드</span>`;
+                            }
+                        }
+                    }
+
+                    const clickAttr = joinable
+                        ? `onclick="joinRoom('${docSnap.id}', ${room.hasPassword})"`
+                        : (isFull && isWaiting
+                            ? `onclick="showToast('방이 가득 찼습니다 (${playerCount}/${maxP})')"`
+                            : `onclick="showToast('이미 게임이 진행 중인 방입니다. 참가할 수 없어요.')"`);
+                    const dim = joinable ? '' : 'opacity-70';
+
                     return `
-                        <div class="screen-panel-item flex justify-between items-center" onclick="joinRoom('${doc.id}', ${room.hasPassword})">
+                        <div class="screen-panel-item flex justify-between items-center ${dim}" ${clickAttr}>
                             <div>
-                                <h3 class="text-lg font-bold text-cyan-300 font-orbitron">${room.name}</h3>
-                                <p class="text-gray-400">호스트: ${room.host.nickname}</p>
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <h3 class="text-lg font-bold text-cyan-300 font-orbitron">${room.name}</h3>
+                                    ${statusBadge}
+                                </div>
+                                <p class="text-gray-400 text-sm">호스트: ${room.host.nickname} ${roundBadge ? '· ' + roundBadge : ''}</p>
                             </div>
-                            <div class="flex items-center space-x-4">
-                                ${room.hasPassword ? `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-lock text-yellow-500"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>` : ''}
-                                <span class="text-xl font-bold text-cyan-400">${playerCount}/12</span>
+                            <div class="flex items-center space-x-3">
+                                ${room.hasPassword ? `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-lock text-yellow-500"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>` : ''}
+                                <span class="text-xl font-bold ${isFull ? 'text-red-400' : 'text-cyan-400'}">${playerCount}/${maxP}</span>
                             </div>
                         </div>`;
                 }).join('');
