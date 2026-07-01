@@ -30,7 +30,7 @@
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
         let observationResultTimer = null; // 측정 완료 후 결과 공개 예약 타이머(중복/경쟁 방지)
-        const APP_VERSION = 'v1.25 · 2026-06-28 · roomstatus'; // 배포 버전 확인용(개발자 모드에서 모서리에 표시)
+        const APP_VERSION = 'v1.26 · 2026-06-28 · dice-hidden-fix'; // 배포 버전 확인용(개발자 모드에서 모서리에 표시)
         let submittedActionToken = null; // 이번 단계에 투표/행동을 보냈는지 추적(반영 안 되면 다시 안내)
         // 단계를 구분하는 토큰(라운드·낮밤·서브단계·종료시각이 바뀌면 새 단계)
         function phaseToken(gs) { return gs ? `${gs.round}|${gs.phase}|${gs.subPhase}|${gs.timerEndAt || ''}` : ''; }
@@ -3218,6 +3218,8 @@
             display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.4rem;
             padding: 20px; animation: fade-in 0.3s ease-out;
         }
+        /* ID 선택자가 .hidden(display:none)을 덮어써 항상 보이던 문제 방지 */
+        #dice-overlay.hidden { display: none; }
         #dice-title { font-family: var(--font-title); font-size: 1.15rem; letter-spacing: 0.3em; color: #f4ead0;
             text-shadow: 0 1px 0 #000, 0 0 14px rgba(183,151,88,.35); }
         .dice-prompt { font-size: 1.05rem; font-weight: 600; color: #c7cdda; text-align: center; min-height: 1.4rem; max-width: 90%; }
