@@ -7,7 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Orbitron:wght@700&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.7.77/Tone.js"></script>
     <script type="module">
         // Firebase SDK
@@ -30,7 +30,22 @@
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
         let observationResultTimer = null; // 측정 완료 후 결과 공개 예약 타이머(중복/경쟁 방지)
-        const APP_VERSION = 'v1.27 · 2026-06-28 · skip-observation'; // 배포 버전 확인용(개발자 모드에서 모서리에 표시)
+        const APP_VERSION = 'v1.28'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
+        // 최근 업데이트 이력(최신순, 최근 5개 유지)
+        const CHANGELOG = [
+            { v: 'v1.28', date: '2026-07-09', items: [
+                '진행자 강퇴 기능 추가 (튕긴/나간 사람 자리 정리)',
+                '투표·행동이 모두 끝나면 자동으로 다음 단계 진행',
+                '낮 토론 시간 60초로 단축 + 진행자 "+30초" 연장 버튼',
+                '밤 토론 단계 삭제 (밤은 바로 행동으로)',
+                '첫 화면 업데이트 이력 탭 추가',
+                '솔베이 회의풍 석조 테마로 분위기 변경',
+            ]},
+            { v: 'v1.27', date: '2026-06-28', items: ['상태판 공개 30초 대기를 진행자가 즉시 넘기는 버튼'] },
+            { v: 'v1.26', date: '2026-06-28', items: ['첫 화면에 측정 화면이 잘못 뜨던 버그 수정'] },
+            { v: 'v1.25', date: '2026-06-28', items: ['방 목록에 대기중/진행중 상태 + 현재 라운드 표시'] },
+            { v: 'v1.24', date: '2026-06-28', items: ['측정 주사위를 대상 본인이 터치해 굴리기 + 효과음'] },
+        ];
         let submittedActionToken = null; // 이번 단계에 투표/행동을 보냈는지 추적(반영 안 되면 다시 안내)
         // 단계를 구분하는 토큰(라운드·낮밤·서브단계·종료시각이 바뀌면 새 단계)
         function phaseToken(gs) { return gs ? `${gs.round}|${gs.phase}|${gs.subPhase}|${gs.timerEndAt || ''}` : ''; }
@@ -126,6 +141,34 @@
                 screenToShow.classList.remove('hidden');
                 if (screenId !== 'game-screen') playSound('popupOpen');
             }
+            // 업데이트 탭은 초반 화면(닉네임/메인/모드선택)에서만 노출
+            const upTab = document.getElementById('update-tab');
+            if (upTab) {
+                const show = ['nickname-screen', 'main-menu-screen', 'create-mode-selection-screen', 'join-mode-selection-screen'].includes(screenId);
+                upTab.classList.toggle('hidden', !show);
+            }
+        }
+
+        // --- 업데이트 이력 팝업 ---
+        function showUpdatePopup() {
+            playSound('popupOpen');
+            const el = document.getElementById('update-content');
+            el.innerHTML = CHANGELOG.map((c, i) => `
+                <div class="border-b border-cyan-500/20 pb-3">
+                    <div class="flex items-baseline gap-2">
+                        <span class="font-orbitron font-bold text-lg ${i === 0 ? 'text-cyan-300' : 'text-gray-300'}">${c.v}</span>
+                        ${i === 0 ? '<span class="text-xs bg-cyan-500/20 text-cyan-300 px-2 py-0.5 rounded-full">최신</span>' : ''}
+                        <span class="text-xs text-gray-500">${c.date}</span>
+                    </div>
+                    <ul class="list-disc list-inside mt-2 space-y-1 text-gray-200 text-sm">
+                        ${c.items.map(it => `<li>${it}</li>`).join('')}
+                    </ul>
+                </div>`).join('');
+            document.getElementById('update-popup').classList.remove('hidden');
+        }
+        function hideUpdatePopup() {
+            playSound('click');
+            document.getElementById('update-popup').classList.add('hidden');
         }
 
         function setNicknameAndShowMain() {
@@ -529,6 +572,7 @@
 
             playerList.forEach(p => {
                     const isEntangled = entangledPlayerIds.includes(p.id);
+                    const kickBtn = localPlayer.isHost ? `<button onclick="kickPlayer('${p.id}')" title="강퇴" class="ml-2 text-red-400 hover:text-red-300 text-sm font-bold">✕</button>` : '';
                     playerSlotsEl.innerHTML += `
                         <div class="bg-black/20 p-4 rounded-lg shadow-inner-dark">
                              <div class="flex items-center justify-between">
@@ -537,7 +581,10 @@
                                      <span class="text-white text-lg font-bold">${p.nickname}</span>
                                      ${isEntangled ? '<span title="양자 얽힘 상태">🔗</span>' : ''}
                                  </div>
-                                 <span class="${p.isReady ? 'text-cyan-400' : 'text-gray-400'} font-bold">${p.isReady ? '준비완료' : '대기중'}</span>
+                                 <div class="flex items-center">
+                                     <span class="${p.isReady ? 'text-cyan-400' : 'text-gray-400'} font-bold">${p.isReady ? '준비완료' : '대기중'}</span>
+                                     ${kickBtn}
+                                 </div>
                              </div>
                         </div>`;
             });
@@ -708,8 +755,8 @@
                         players: updatedPlayers,
                         gameState: {
                             phase: 'DAY', round: 1, subPhase: 'DISCUSSION',
-                            timer: 300,
-                            timerEndAt: Date.now() + 300 * 1000,
+                            timer: 60,
+                            timerEndAt: Date.now() + 60 * 1000,
                             message: "첫번째 낮입니다. 치료할 사람을 토론하세요.",
                             isPlayerActing: false
                         },
@@ -922,6 +969,7 @@
                                 ${botControls}
                                 ${actionStatus}
                                 ${p.isAlive ? '' : '<span class="text-red-500 font-bold ml-2">사망</span>'}
+                                <button onclick="kickPlayer('${p.id}')" title="강퇴" class="text-red-400 hover:text-red-300 text-sm font-bold ml-1">✕</button>
                             </div>
                         </div>
                         <div class="grid grid-cols-6 gap-1 mt-2">${chipsHtml}</div>
@@ -951,8 +999,14 @@
             }
 
             if (allActed) {
-                hostProceedBtn.classList.remove('hidden');
-                 hostSkipVoteBtn.classList.add('hidden'); // 모두 행동했으면 스킵 버튼 숨김
+                hostSkipVoteBtn.classList.add('hidden');
+                // 모두 투표/행동을 마치면 호스트가 누르지 않아도 자동으로 다음 단계 진행
+                if ((gameState.subPhase === 'VOTE' || gameState.subPhase === 'ACTION') && !gameState.isPlayerActing && !isProceeding) {
+                    hostProceedBtn.classList.add('hidden');
+                    hostProceedPhase(true);
+                } else {
+                    hostProceedBtn.classList.remove('hidden'); // 백업: 수동 진행 버튼
+                }
             } else {
                 hostProceedBtn.classList.add('hidden');
             }
@@ -962,6 +1016,7 @@
             const { gameState } = room;
             const timerEl = document.getElementById('timer');
             const hostSkipBtn = document.getElementById('host-skip-timer-btn');
+            const hostExtendBtn = document.getElementById('host-extend-timer-btn');
 
             if (localPlayer.isHost && (gameState.subPhase === 'DISCUSSION' || gameState.subPhase === 'OBSERVATION')) {
                 hostSkipBtn.classList.remove('hidden');
@@ -971,6 +1026,8 @@
             } else {
                 hostSkipBtn.classList.add('hidden');
             }
+            // +30초 연장 버튼: 낮 토론에서 호스트에게만
+            if (hostExtendBtn) hostExtendBtn.classList.toggle('hidden', !(localPlayer.isHost && gameState.subPhase === 'DISCUSSION'));
             
             // 토론뿐 아니라 투표·행동 단계도 제한시간을 둬서, 누군가 이탈해도 자동으로 진행되게 함
             if (['DISCUSSION', 'VOTE', 'ACTION'].includes(gameState.subPhase)) {
@@ -1016,6 +1073,21 @@
                 timerEl.classList.add('hidden');
                 if(gameTimerInterval) { clearInterval(gameTimerInterval); gameTimerInterval = null; }
             }
+        }
+
+        // 진행자: 낮 토론 시간 +30초 연장
+        async function hostExtendTimer() {
+            if (!currentRoomId || !localPlayer.isHost) return;
+            const gs = currentRoomData?.gameState;
+            if (!gs || gs.subPhase !== 'DISCUSSION') return;
+            playSound('click');
+            const roomRef = doc(db, 'rooms', currentRoomId);
+            const base = gs.timerEndAt || (Date.now() + (gs.timer || 60) * 1000);
+            await updateDoc(roomRef, {
+                'gameState.timer': (gs.timer || 60) + 30,
+                'gameState.timerEndAt': base + 30000
+            });
+            showToast('⏱ 토론 시간 +30초');
         }
 
         async function hostProceedPhase(silent = false) {
@@ -1176,11 +1248,12 @@
                             }
                             // *** NEW LOGIC END ***
 
+                            // 밤 토론 단계 삭제 → 바로 '행동'으로 (정체 노출·지루함 방지)
                             newGameState.phase = 'NIGHT';
-                            newGameState.subPhase = 'DISCUSSION';
-                            newGameState.timer = 300;
-                            newGameState.timerEndAt = Date.now() + 300 * 1000;
-                            newGameState.message = "밤입니다. 감염 및 보호 대상을 토론하세요.";
+                            newGameState.subPhase = 'ACTION';
+                            newGameState.timer = 90;
+                            newGameState.timerEndAt = Date.now() + 90 * 1000;
+                            newGameState.message = "능력을 사용할 대상을 선택하세요.";
                             delete newGameState.revoteCandidates;
                             delete newGameState.lastVoteResult;
                         }
@@ -1284,8 +1357,8 @@
                             } else {
                                 newGameState.phase = 'DAY';
                                 newGameState.subPhase = 'DISCUSSION';
-                                newGameState.timer = 300;
-                                newGameState.timerEndAt = Date.now() + 300 * 1000;
+                                newGameState.timer = 60;
+                                newGameState.timerEndAt = Date.now() + 60 * 1000;
                                 newGameState.message = `${newGameState.round}번째 낮입니다. 치료할 사람을 토론하세요.`;
                             }
                             delete newGameState.isFirewallActive; // 밤이 끝나면 방화벽 효과 제거
@@ -1974,6 +2047,25 @@
             }
         }
 
+        // --- 호스트 강퇴 ---
+        window.kickPlayer = (playerId) => {
+            if (!currentRoomId || !localPlayer.isHost || !playerId) return;
+            const p = currentRoomData?.players?.[playerId];
+            if (!p) return;
+            playSound('click');
+            showCustomAlertWithHTML(`「${p.nickname}」님을 강퇴하시겠습니까?<br/><br/><div class="flex justify-center gap-4"><button id="kick-confirm-btn" class="bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-6 rounded-lg">강퇴</button><button onclick="hideCustomAlert()" class="btn-secondary">취소</button></div>`);
+            setTimeout(() => {
+                const y = document.getElementById('kick-confirm-btn');
+                if (y) y.addEventListener('click', async () => {
+                    hideCustomAlert();
+                    try {
+                        await updateDoc(doc(db, 'rooms', currentRoomId), { [`players.${playerId}`]: deleteField() });
+                        showToast(`「${p.nickname}」님을 강퇴했습니다.`);
+                    } catch (e) { console.error('강퇴 실패:', e); showCustomAlert('강퇴에 실패했습니다.'); }
+                });
+            }, 0);
+        };
+
         // --- 개발자 모드 전용 함수 ---
         function addBotPlayer() {
             if (!isDevMode || !localPlayer.isHost) return;
@@ -2203,7 +2295,7 @@
                     radius: Math.random() * 1.5,
                     vx: (Math.random() - 0.5) * 0.5,
                     vy: (Math.random() - 0.5) * 0.5,
-                    color: Math.random() > 0.82 ? '#e6c067' : (Math.random() > 0.5 ? '#7dd3fc' : '#cbd5e1')
+                    color: Math.random() > 0.7 ? '#c9a24b' : (Math.random() > 0.5 ? '#a68a5b' : '#7d6f57')
                 });
             }
 
@@ -2813,6 +2905,7 @@
             document.getElementById('confirm-leave-btn').addEventListener('click', () => { playSound('click'); leaveRoom(false); });
             document.getElementById('host-proceed-btn').addEventListener('click', () => { playSound('click'); hostProceedPhase(); });
             document.getElementById('host-skip-timer-btn').addEventListener('click', () => { playSound('click'); hostProceedPhase(); });
+            document.getElementById('host-extend-timer-btn').addEventListener('click', hostExtendTimer);
             document.getElementById('host-apply-observation-cards-btn').addEventListener('click', () => { playSound('click'); hostApplyObservationCards(); });
             document.getElementById('host-skip-observation-btn').addEventListener('click', hostSkipObservation);
             document.getElementById('host-skip-vote-btn').addEventListener('click', () => { playSound('click'); hostProceedPhase(); });
@@ -2823,6 +2916,9 @@
             document.getElementById('event-log-btn').addEventListener('click', showEventLogPopup);
             document.getElementById('close-event-log-btn').addEventListener('click', hideEventLogPopup);
             document.getElementById('scramble-use-btn').addEventListener('click', handleCardClick);
+            document.getElementById('update-tab').addEventListener('click', showUpdatePopup);
+            document.getElementById('close-update-btn').addEventListener('click', hideUpdatePopup);
+            document.getElementById('update-tab').textContent = '📋 ' + APP_VERSION + ' 업데이트';
 
             // 추리 메모
             document.getElementById('memo-btn').addEventListener('click', showMemoPopup);
@@ -2898,51 +2994,54 @@
 
     </script>
     <style>
+        /* ===== 솔베이 회의풍 석조·황동 테마 ===== */
         :root {
-            --bg-color: #070b16;
-            --panel-bg-1: rgba(18, 28, 52, 0.92);
-            --panel-bg-2: rgba(9, 14, 28, 0.94);
-            --primary-cyan: #22d3ee;
-            --primary-orange: #f97316;
-            --accent-gold: #e6c067;
-            --accent-gold-soft: rgba(230, 192, 103, 0.55);
-            --font-title: 'Orbitron', sans-serif;
+            --bg-color: #14110d;
+            --panel-bg-1: rgba(42, 36, 28, 0.94);
+            --panel-bg-2: rgba(24, 20, 15, 0.96);
+            --primary-cyan: #7fb2a6;          /* 청동 녹청(verdigris) — 네온 대신 고풍 */
+            --primary-orange: #c98a3c;
+            --accent-gold: #c9a24b;           /* 황동 */
+            --accent-gold-soft: rgba(201, 162, 75, 0.6);
+            --stone-line: rgba(201, 162, 75, 0.28);
+            --font-title: 'Cinzel', serif;    /* 고전 로마 대문자 */
             --font-body: 'Rajdhani', sans-serif;
         }
         body {
             font-family: var(--font-body);
             background-color: var(--bg-color);
             background-image:
-                radial-gradient(ellipse at 50% -10%, rgba(34, 211, 238, 0.12), transparent 55%),
-                radial-gradient(ellipse at 80% 110%, rgba(230, 192, 103, 0.08), transparent 50%),
-                linear-gradient(180deg, #070b16 0%, #0a1124 50%, #060912 100%);
+                radial-gradient(ellipse at 50% -8%, rgba(201, 162, 75, 0.10), transparent 55%),
+                radial-gradient(ellipse at 85% 115%, rgba(127, 178, 166, 0.06), transparent 50%),
+                linear-gradient(180deg, #1a160f 0%, #14110d 55%, #0e0b08 100%);
             background-attachment: fixed;
-            color: #e2e8f0;
+            color: #e8ddc7;
         }
         #starfield-bg {
             position: fixed;
             top: 0; left: 0;
             z-index: -1;
-            opacity: 0.45;
+            opacity: 0.28;              /* 석조 분위기에 맞춰 은은한 먼지 입자처럼 */
         }
         .title-text {
             font-family: var(--font-title);
-            color: #e8fbff;
-            letter-spacing: 0.04em;
-            text-shadow: 0 0 6px rgba(34, 211, 238, 0.9), 0 0 18px rgba(34, 211, 238, 0.45);
+            font-weight: 700;
+            color: #e9d7a8;             /* 황동빛 각인 */
+            letter-spacing: 0.06em;
+            text-shadow: 0 1px 0 rgba(0,0,0,0.6), 0 0 14px rgba(201, 162, 75, 0.35);
         }
         .screen-panel {
             position: relative;
             background-image: linear-gradient(150deg, var(--panel-bg-1), var(--panel-bg-2));
             backdrop-filter: blur(12px);
-            border: 1px solid rgba(34, 211, 238, 0.35);
+            border: 1px solid rgba(201, 162, 75, 0.38);
             box-shadow:
-                0 18px 50px rgba(0, 0, 0, 0.55),
-                0 0 24px rgba(34, 211, 238, 0.12),
-                inset 0 1px 0 rgba(255, 255, 255, 0.06),
-                inset 0 0 24px rgba(34, 211, 238, 0.06);
+                0 18px 50px rgba(0, 0, 0, 0.6),
+                0 0 24px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(255, 240, 210, 0.08),
+                inset 0 0 30px rgba(0, 0, 0, 0.35);
             padding: 1rem;
-            border-radius: 1.1rem;
+            border-radius: 0.9rem;
         }
         /* 보드게임 카드 상단의 금색 라인 액센트 */
         .screen-panel::before {
@@ -2959,19 +3058,19 @@
             }
         }
         .screen-panel-item {
-            background-image: linear-gradient(150deg, rgba(20, 30, 54, 0.6), rgba(6, 10, 22, 0.6));
+            background-image: linear-gradient(150deg, rgba(48, 41, 31, 0.6), rgba(22, 18, 13, 0.6));
             padding: 1rem;
-            border-radius: 0.65rem;
-            border: 1px solid rgba(34, 211, 238, 0.22);
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+            border-radius: 0.55rem;
+            border: 1px solid rgba(201, 162, 75, 0.24);
+            box-shadow: inset 0 1px 0 rgba(255,240,210,0.05);
             transition: all 0.25s ease;
             cursor: pointer;
         }
         .screen-panel-item:hover {
-            background-image: linear-gradient(150deg, rgba(34, 211, 238, 0.18), rgba(20, 30, 54, 0.5));
+            background-image: linear-gradient(150deg, rgba(201, 162, 75, 0.16), rgba(48, 41, 31, 0.55));
             border-color: var(--accent-gold-soft);
             transform: translateY(-2px);
-            box-shadow: 0 10px 26px rgba(0,0,0,0.45), 0 0 14px rgba(34, 211, 238, 0.18);
+            box-shadow: 0 10px 26px rgba(0,0,0,0.5), 0 0 14px rgba(201, 162, 75, 0.18);
         }
         /* 비활성(개발 중) 모드 카드 */
         .mode-disabled { opacity: 0.55; }
@@ -2995,35 +3094,38 @@
             border-radius: 999px;
         }
         .btn-primary {
-            background-image: linear-gradient(180deg, #5ff5ff, #22d3ee);
-            color: #06121a;
+            background-image: linear-gradient(180deg, #e0be6f, #b9902f);
+            color: #241a08;
             font-weight: 700;
+            font-family: var(--font-title);
             padding: 0.75rem 1rem;
-            border-radius: 0.6rem;
-            letter-spacing: 0.03em;
-            box-shadow: 0 6px 18px rgba(34, 211, 238, 0.28), inset 0 1px 0 rgba(255,255,255,0.5);
+            border-radius: 0.5rem;
+            letter-spacing: 0.06em;
+            border: 1px solid rgba(120, 92, 30, 0.6);
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255,244,210,0.5);
             transition: all 0.25s ease;
             text-transform: uppercase;
         }
         .btn-primary:hover:not(:disabled) {
-            background-image: linear-gradient(180deg, #7dfbff, #34dcf0);
-            box-shadow: 0 8px 24px rgba(95, 245, 255, 0.5), inset 0 1px 0 rgba(255,255,255,0.6);
+            background-image: linear-gradient(180deg, #f0d187, #c99f3c);
+            box-shadow: 0 8px 24px rgba(201, 162, 75, 0.4), inset 0 1px 0 rgba(255,244,210,0.6);
             transform: translateY(-1px);
         }
         .btn-secondary {
-            background-color: rgba(34, 211, 238, 0.04);
-            color: var(--primary-cyan);
-            border: 1px solid rgba(34, 211, 238, 0.55);
+            background-color: rgba(201, 162, 75, 0.06);
+            color: #e0c987;
+            border: 1px solid rgba(201, 162, 75, 0.5);
             font-weight: 700;
+            font-family: var(--font-title);
             padding: 0.75rem 1rem;
-            border-radius: 0.6rem;
-            letter-spacing: 0.03em;
+            border-radius: 0.5rem;
+            letter-spacing: 0.05em;
             transition: all 0.25s ease;
         }
         .btn-secondary:hover {
-            background-color: rgba(34, 211, 238, 0.16);
+            background-color: rgba(201, 162, 75, 0.16);
             border-color: var(--accent-gold-soft);
-            box-shadow: 0 0 14px rgba(34, 211, 238, 0.25);
+            box-shadow: 0 0 14px rgba(201, 162, 75, 0.25);
         }
         #vote-targets button.bg-cyan-500 {
             border: 2px solid #67e8f9;
@@ -3040,7 +3142,7 @@
             position: fixed;
             inset: 0;
             background:
-                radial-gradient(ellipse at 50% 40%, transparent 45%, rgba(10, 14, 38, 0.45) 100%);
+                radial-gradient(ellipse at 50% 40%, transparent 45%, rgba(12, 10, 22, 0.5) 100%);
             z-index: 10;
             pointer-events: none;
             opacity: 0;
@@ -3288,6 +3390,27 @@
         @keyframes dice-slam { 0%{transform:scale(2.4) rotate(-8deg);opacity:0} 55%{opacity:1} 100%{transform:scale(1) rotate(0);opacity:1} }
 
         /* 개발자 모드 버전 표시(모서리에 은은하게) */
+        /* 첫 화면 업데이트 이력 탭 */
+        #update-tab {
+            position: fixed;
+            top: 10px; right: 10px;
+            z-index: 120;
+            font-family: var(--font-body);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            color: #e9d7a8;
+            background: linear-gradient(180deg, rgba(48,41,31,0.95), rgba(26,21,15,0.95));
+            border: 1px solid rgba(201,162,75,0.5);
+            padding: 5px 11px;
+            border-radius: 999px;
+            cursor: pointer;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.4);
+            transition: all 0.2s ease;
+        }
+        #update-tab:hover { background: linear-gradient(180deg, rgba(64,54,40,0.98), rgba(36,29,20,0.98)); box-shadow: 0 4px 14px rgba(201,162,75,0.25); }
+        #update-tab:active { transform: scale(0.96); }
+
         #version-badge {
             position: fixed;
             right: 6px;
@@ -3453,8 +3576,11 @@
             </div>
             <div id="timer" class="w-full flex-shrink-0">
                 <div class="flex justify-between items-center">
-                    <div id="timer-text" class="text-center font-bold text-2xl mb-1">300</div>
-                    <button id="host-skip-timer-btn" class="hidden bg-yellow-600 hover:bg-yellow-500 text-black font-bold py-1 px-3 rounded-lg text-sm">턴 종료</button>
+                    <div id="timer-text" class="text-center font-bold text-2xl mb-1">60</div>
+                    <div class="flex items-center gap-2">
+                        <button id="host-extend-timer-btn" class="hidden bg-cyan-700 hover:bg-cyan-600 text-white font-bold py-1 px-3 rounded-lg text-sm">+30초</button>
+                        <button id="host-skip-timer-btn" class="hidden bg-yellow-600 hover:bg-yellow-500 text-black font-bold py-1 px-3 rounded-lg text-sm">턴 종료</button>
+                    </div>
                 </div>
                 <div id="timer-bar" class="w-full bg-gray-700 rounded-full h-4">
                     <div id="timer-bar-inner" class="bg-cyan-400 h-4 rounded-full transition-all duration-1000 linear"></div>
@@ -3693,6 +3819,19 @@
 
         <!-- 토스트(가벼운 알림) 컨테이너 -->
         <div id="toast-container"></div>
+
+        <!-- 첫 화면 업데이트 이력 탭 -->
+        <button id="update-tab" class="hidden">📋 업데이트</button>
+        <div id="update-popup" class="hidden absolute inset-0 bg-black/60 flex items-center justify-center z-[101] p-4 popup-overlay">
+            <div class="screen-panel w-full max-w-lg max-h-[80vh] flex flex-col relative popup-panel">
+                <button id="close-update-btn" class="absolute top-4 right-4 text-gray-400 hover:text-white z-10">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
+                <h2 class="title-text text-2xl font-bold text-center mb-1">업데이트 소식</h2>
+                <p class="text-center text-gray-400 text-sm mb-3">최근 변경 사항</p>
+                <div id="update-content" class="flex-grow overflow-y-auto pr-2 space-y-4"></div>
+            </div>
+        </div>
 
         <!-- 배포 버전 표시(개발자 모드에서만 모서리에 살짝) -->
         <div id="version-badge" class="hidden"></div>
