@@ -30,9 +30,13 @@
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
         let observationResultTimer = null; // 측정 완료 후 결과 공개 예약 타이머(중복/경쟁 방지)
-        const APP_VERSION = 'v1.28'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
+        const APP_VERSION = 'v1.29'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
         // 최근 업데이트 이력(최신순, 최근 5개 유지)
         const CHANGELOG = [
+            { v: 'v1.29', date: '2026-07-09', items: [
+                '컨셉아트풍 꾸미기: 리본 배너 타이틀 + 수식 낙서 배경 + 액자 프레임',
+                '개발자 모드 봇 추가 실패 시 원인 표시(오류 알림) 및 안정화',
+            ]},
             { v: 'v1.28', date: '2026-07-09', items: [
                 '진행자 강퇴 기능 추가 (튕긴/나간 사람 자리 정리)',
                 '투표·행동이 모두 끝나면 자동으로 다음 단계 진행',
@@ -44,7 +48,6 @@
             { v: 'v1.27', date: '2026-06-28', items: ['상태판 공개 30초 대기를 진행자가 즉시 넘기는 버튼'] },
             { v: 'v1.26', date: '2026-06-28', items: ['첫 화면에 측정 화면이 잘못 뜨던 버그 수정'] },
             { v: 'v1.25', date: '2026-06-28', items: ['방 목록에 대기중/진행중 상태 + 현재 라운드 표시'] },
-            { v: 'v1.24', date: '2026-06-28', items: ['측정 주사위를 대상 본인이 터치해 굴리기 + 효과음'] },
         ];
         let submittedActionToken = null; // 이번 단계에 투표/행동을 보냈는지 추적(반영 안 되면 다시 안내)
         // 단계를 구분하는 토큰(라운드·낮밤·서브단계·종료시각이 바뀌면 새 단계)
@@ -2067,24 +2070,33 @@
         };
 
         // --- 개발자 모드 전용 함수 ---
-        function addBotPlayer() {
-            if (!isDevMode || !localPlayer.isHost) return;
-            const roomRef = doc(db, 'rooms', currentRoomId); 
-            runTransaction(db, async (transaction) => {
-                const roomDoc = await transaction.get(roomRef);
-                if (!roomDoc.exists()) return;
-                const room = roomDoc.data();
-                const playerCount = Object.keys(room.players).length;
-                if (playerCount >= 12) return;
+        async function addBotPlayer() {
+            if (!isDevMode) { showToast('개발자 모드(?dev=true)에서만 가능합니다.'); return; }
+            if (!localPlayer.isHost) { showToast('호스트만 봇을 추가할 수 있습니다.'); return; }
+            if (!currentRoomId) { showToast('방 정보를 찾을 수 없습니다.'); return; }
+            playSound('click');
+            try {
+                const roomRef = doc(db, 'rooms', currentRoomId);
+                await runTransaction(db, async (transaction) => {
+                    const roomDoc = await transaction.get(roomRef);
+                    if (!roomDoc.exists()) throw new Error('방이 존재하지 않습니다.');
+                    const room = roomDoc.data();
+                    const playerCount = Object.keys(room.players || {}).length;
+                    if (playerCount >= (room.maxPlayers || 12)) throw new Error('방이 가득 찼습니다.');
 
-                const existingNumbers = Object.values(room.players).map(p => p.number);
-                let newPlayerNumber = 1;
-                while(existingNumbers.includes(newPlayerNumber)) { newPlayerNumber++; }
-                
-                const botId = `bot_${Date.now()}`;
-                const botData = { id: botId, nickname: `Bot ${newPlayerNumber}`, isReady: true, number: newPlayerNumber, isAlive: true, quantumState: [], finalRole: null, initialRole: null, currentRole: null, abilityCard: null, hasUsedCard: false };
-                transaction.update(roomRef, { [`players.${botId}`]: botData });
-            });
+                    const existingNumbers = Object.values(room.players || {}).map(p => p.number);
+                    let newPlayerNumber = 1;
+                    while (existingNumbers.includes(newPlayerNumber)) { newPlayerNumber++; }
+
+                    const botId = `bot_${Date.now()}`;
+                    const botData = { id: botId, nickname: `Bot ${newPlayerNumber}`, isReady: true, number: newPlayerNumber, isAlive: true, quantumState: [], finalRole: null, initialRole: null, currentRole: null, abilityCard: null, hasUsedCard: false };
+                    transaction.update(roomRef, { [`players.${botId}`]: botData });
+                });
+                showToast('🤖 봇이 추가되었습니다.');
+            } catch (e) {
+                console.error('봇 추가 실패:', e);
+                showCustomAlert('봇 추가 실패: ' + (e.message || e));
+            }
         };
 
         function hostControlBot(botId, controlType) {
@@ -3017,6 +3029,16 @@
             background-attachment: fixed;
             color: #e8ddc7;
         }
+        /* 컨셉아트 액자 테두리의 물리 수식 낙서(세피아, 아주 은은하게) */
+        body::before {
+            content: '';
+            position: fixed;
+            inset: 0;
+            z-index: -1;
+            pointer-events: none;
+            opacity: 0.5;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='340' height='260'%3E%3Cg fill='none' stroke='%23c9a24b' stroke-width='1' opacity='0.07' font-family='serif' font-size='17'%3E%3Ctext x='16' y='34' fill='%23c9a24b' stroke='none'%3EE = mc%C2%B2%3C/text%3E%3Ctext x='218' y='66' fill='%23c9a24b' stroke='none'%3E%CE%94x%C2%B7%CE%94p %E2%89%A5 %C4%A7/2%3C/text%3E%3Ctext x='40' y='128' fill='%23c9a24b' stroke='none'%3Ei%C4%A7 %E2%88%82%CF%88/%E2%88%82t = %C4%A4%CF%88%3C/text%3E%3Ctext x='210' y='170' fill='%23c9a24b' stroke='none'%3E%CE%BB = h/p%3C/text%3E%3Ctext x='24' y='222' fill='%23c9a24b' stroke='none'%3EE = h%CE%BD%3C/text%3E%3Ccircle cx='170' cy='105' r='13'/%3E%3Cellipse cx='170' cy='105' rx='30' ry='10' transform='rotate(28 170 105)'/%3E%3Cellipse cx='170' cy='105' rx='30' ry='10' transform='rotate(-28 170 105)'/%3E%3C/g%3E%3C/svg%3E");
+        }
         #starfield-bg {
             position: fixed;
             top: 0; left: 0;
@@ -3043,14 +3065,23 @@
             padding: 1rem;
             border-radius: 0.9rem;
         }
-        /* 보드게임 카드 상단의 금색 라인 액센트 */
+        /* 컨셉아트풍 이중 액자: 바깥 금테 + 안쪽 가는 프레임 */
         .screen-panel::before {
             content: '';
             position: absolute;
-            top: 0; left: 18%; right: 18%;
-            height: 1px;
+            inset: 6px;
+            border: 1px solid var(--stone-line);
+            border-radius: 0.6rem;
+            pointer-events: none;
+        }
+        .screen-panel::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 14%; right: 14%;
+            height: 2px;
             background: linear-gradient(90deg, transparent, var(--accent-gold-soft), transparent);
-            border-radius: 1px;
+            border-radius: 2px;
+            pointer-events: none;
         }
         @media (min-width: 640px) {
             .screen-panel {
@@ -3390,6 +3421,57 @@
         @keyframes dice-slam { 0%{transform:scale(2.4) rotate(-8deg);opacity:0} 55%{opacity:1} 100%{transform:scale(1) rotate(0);opacity:1} }
 
         /* 개발자 모드 버전 표시(모서리에 은은하게) */
+        /* ===== 컨셉아트풍 리본 배너 타이틀 ===== */
+        .masters-tag {
+            font-family: var(--font-title);
+            font-size: 0.72rem;
+            letter-spacing: 0.28em;
+            color: rgba(233, 215, 168, 0.75);
+            margin-bottom: 0.7rem;
+        }
+        .title-banner {
+            position: relative;
+            display: inline-block;
+            margin: 0 auto 0.6rem;
+            padding: 0.7rem 2.2rem 0.8rem;
+            background: linear-gradient(180deg, #e8d3a0, #c9a860 55%, #b08f45);
+            border: 2px solid #7a5f2a;
+            border-radius: 10px 10px 14px 14px / 60% 60% 45% 45%;
+            box-shadow: 0 6px 18px rgba(0,0,0,0.5), inset 0 2px 0 rgba(255,246,220,0.6), inset 0 -4px 8px rgba(90,66,20,0.35);
+            transform: rotate(-1.2deg);
+        }
+        /* 리본 접힌 양끝 */
+        .title-banner::before, .title-banner::after {
+            content: '';
+            position: absolute;
+            top: 22%;
+            width: 26px; height: 62%;
+            background: linear-gradient(180deg, #a8842f, #7d611f);
+            border: 2px solid #6a5220;
+            z-index: -1;
+        }
+        .title-banner::before { left: -20px; transform: skewY(14deg); border-radius: 4px 0 0 6px; }
+        .title-banner::after  { right: -20px; transform: skewY(-14deg); border-radius: 0 4px 6px 0; }
+        .title-banner h1 {
+            font-family: var(--font-title);
+            font-weight: 900;
+            font-size: clamp(1.5rem, 6vw, 2.4rem);
+            letter-spacing: 0.06em;
+            color: #3a2a10;
+            text-shadow: 0 1px 0 rgba(255,244,214,0.7);
+        }
+        .solvay-plaque {
+            font-family: var(--font-title);
+            font-size: 0.68rem;
+            letter-spacing: 0.22em;
+            color: rgba(201, 162, 75, 0.8);
+            border-top: 1px solid rgba(201, 162, 75, 0.3);
+            border-bottom: 1px solid rgba(201, 162, 75, 0.3);
+            display: inline-block;
+            padding: 0.3rem 1rem;
+            margin-bottom: 1.6rem;
+        }
+
         /* 첫 화면 업데이트 이력 탭 */
         #update-tab {
             position: fixed;
@@ -3451,7 +3533,11 @@
         </div>
         <div id="main-menu-screen" class="screen hidden w-full max-w-md">
             <div class="screen-panel text-center">
-                 <h1 class="title-text text-4xl sm:text-5xl font-bold text-center mb-8">AEON INVASION</h1>
+                 <p class="masters-tag">⚛ THE MASTERS OF PHYSICS ⚛</p>
+                 <div class="title-banner">
+                     <h1>AEON INVASION</h1>
+                 </div>
+                 <p class="solvay-plaque">SOLVAY CONFERENCE · 1927 · BRUSSELS</p>
                  <div class="space-y-4">
                       <button id="create-room-btn" class="w-full btn-primary text-xl sm:text-2xl py-3 sm:py-4">
                            게임방 만들기
