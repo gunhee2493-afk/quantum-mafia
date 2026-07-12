@@ -30,9 +30,13 @@
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
         let observationResultTimer = null; // 측정 완료 후 결과 공개 예약 타이머(중복/경쟁 방지)
-        const APP_VERSION = 'v1.38'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
+        const APP_VERSION = 'v1.39'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
         // 최근 업데이트 이력(최신순, 최근 5개 유지)
         const CHANGELOG = [
+            { v: 'v1.39', date: '2026-07-12', items: [
+                '룰북 정리: 정체=상태판 표로 통일, "백신 개발자" 명칭 통일, 치료제 vs 백신 비교표 추가, 낮 토론 시간 수정',
+                '첫 화면 하단 고정 버전표기(aeon ver) 제거',
+            ]},
             { v: 'v1.38', date: '2026-07-12', items: [
                 '투표·행동 제한시간 90초 → 60초, 호스트 "+30초" 연장 버튼을 투표·행동에도 적용',
                 '투표·행동이 모두 완료되면 즉시 다음 단계로 진행',
@@ -47,10 +51,6 @@
                 '게임 시작 직전 "화면을 벗어나지 마세요" 안내 화면 + 딴 앱 갔다 와도 자동 재동기화, 화면 꺼짐 방지',
                 '룰 변경: 도깨비 없는 판에서 동점이면 인류(과학자) 승리',
                 '로비에서 플레이어 칸을 누르면 강퇴·준비 대신·노벨상 메뉴(터치 쉽게), 봇 추가 버튼 확대',
-            ]},
-            { v: 'v1.34', date: '2026-07-12', items: [
-                '인트로 이미지 2장 추가(총 4장) + 매번 무작위 순서로 표시',
-                '대기방 전용 배경음악 추가 (Whispers in the Lobby)',
             ]},
         ];
         let submittedActionToken = null; // 이번 단계에 투표/행동을 보냈는지 추적(반영 안 되면 다시 안내)
@@ -3865,7 +3865,6 @@
                     입력 완료
                 </button>
             </div>
-             <p class="text-center text-gray-600 mt-4 text-sm font-orbitron">aeon ver 1.21</p>
         </div>
         <div id="main-menu-screen" class="screen hidden w-full max-w-md">
             <div class="screen-panel text-center">
@@ -4099,56 +4098,82 @@
                     </div>
                     <div>
                         <h3 class="font-bold text-2xl text-cyan-300 mb-2 font-orbitron">1. 게임 목표 및 승리 조건</h3>
-                        <p>설정된 라운드(4~6)가 모두 종료되면, 살아남은 과학자들의 최종 신원을 '측정'하여 인류 진영과 에이온 진영의 수를 비교하고, 수가 더 많은 진영이 승리합니다.</p>
+                        <p>설정된 라운드(4~6)가 모두 끝나면, <strong>생존한 참가자 전원의 최종 정체를 '측정'</strong>하여 <strong>인류 진영과 에이온 진영의 수를 비교</strong>하고, 수가 더 많은 진영이 승리합니다.</p>
                         <ul class="list-disc list-inside mt-2 space-y-1">
-                            <li><strong>최종 측정(Measurement)이란?</strong>: 게임이 끝나면 각자의 '양자 상태판'은 여러 가능성이 중첩된 하나의 확률로 존재합니다. '측정'은 이 불확실한 상태를 관측하여 하나의 결과(인류 과학자 또는 에이온 스파이)로 확정하는 과정입니다. 상태판의 붉은 칩(에이온) 비율이 높을수록 측정 시 에이온으로 밝혀질 확률이 높아집니다.</li>
-                            <li><strong>무승부 규칙:</strong> 만약 최종 생존자의 인류 진영과 에이온 진영 수가 같다면(동점), <strong class="text-blue-400">인류 진영의 승리</strong>가 됩니다. (단, 도깨비가 있는 판에서는 동점 시 도깨비가 단독 승리합니다.)</li>
+                            <li><strong>최종 측정이란?</strong> 게임이 끝나면 각자의 상태판은 여러 가능성이 중첩된 확률로 존재합니다. '측정'은 이 불확실한 상태를 관측해 <span class="text-blue-400">인류</span> 또는 <span class="text-red-400">에이온</span> 하나로 확정하는 과정입니다. 붉은 칩 비율이 높을수록 에이온으로 밝혀질 확률이 높습니다.</li>
+                            <li><strong>동점 규칙:</strong> 두 진영 수가 같으면 <strong class="text-blue-400">인류 진영의 승리</strong>입니다. (도깨비가 있는 판은 동점 시 도깨비 단독 승리 — 아래 7번 참고)</li>
                         </ul>
                     </div>
                     <div>
-                        <h3 class="font-bold text-2xl text-cyan-300 mb-2 font-orbitron">2. 양자 상태판</h3>
-                        <p>모든 플레이어는 6개의 칩으로 당신의 정체성을 나타내는 '양자 상태판'을 가집니다. 이 칩의 비율이 당신의 최종 정체가 될 확률입니다.</p>
+                        <h3 class="font-bold text-2xl text-cyan-300 mb-2 font-orbitron">2. 양자 상태판 = 당신의 정체</h3>
+                        <p>모든 플레이어는 6개의 칩으로 된 상태판을 가지며, <strong>이 칩의 색 구성이 곧 당신의 정체이자 능력</strong>입니다. 칩 비율은 최종 측정 때 정체가 될 확률이기도 합니다.</p>
                         <div class="flex items-center space-x-4 mt-2">
-                            <div class="flex items-center space-x-2"><div class="w-5 h-5 rounded bg-blue-500 neon-blue-sm"></div><span>인류 (CITIZEN)</span></div>
-                            <div class="flex items-center space-x-2"><div class="w-5 h-5 rounded bg-red-500 neon-red-sm"></div><span>에이온 (AEON)</span></div>
+                            <div class="flex items-center space-x-2"><div class="w-5 h-5 rounded bg-blue-500 neon-blue-sm"></div><span>파란 칩 = 인류 (CITIZEN)</span></div>
+                            <div class="flex items-center space-x-2"><div class="w-5 h-5 rounded bg-red-500 neon-red-sm"></div><span>빨간 칩 = 에이온 (AEON)</span></div>
                         </div>
                     </div>
                     <div>
-                        <h3 class="font-bold text-2xl text-cyan-300 mb-2 font-orbitron">3. 역할 소개</h3>
-                        <div class="space-y-3">
-                            <p><strong class="text-orange-400">과학자 (Scientist):</strong> 당신은 역사를 바꿀 위대한 지성입니다. 특별한 능력은 없지만, 날카로운 논리와 추리로 동료들 사이에 숨어든 에이온 스파이를 색출하고 인류 과학의 미래를 지켜내야 합니다.</p>
-                            <p><strong class="text-orange-400">백신 개발자 (Developer):</strong> 당신은 에이온의 정신 감염에 저항할 '인지 백신'을 개발한 선구자입니다. 밤마다 동료 한 명에게 백신을 투여하여 에이온의 감염으로부터 보호할 수 있습니다. (자신에게도 투여 가능)</p>
-                            <p><strong class="text-orange-400">에이온 (AEON):</strong> 당신은 과학자로 위장한 외계 스파이입니다. 밤마다 인류 과학자 한 명의 정신을 '감염'시켜, 그의 상태판을 오염시키고 인류 진영을 당신의 편으로 만들어야 합니다.</p>
+                        <h3 class="font-bold text-2xl text-cyan-300 mb-2 font-orbitron">3. 정체와 능력 (상태판으로 결정)</h3>
+                        <p><strong>당신의 역할은 고정이 아닙니다.</strong> 상태판의 칩 색 구성에 따라 정해지고, 게임 중 감염·치료로 바뀔 수 있습니다.</p>
+                        <div class="overflow-x-auto mt-3">
+                            <table class="w-full text-base border-collapse">
+                                <thead><tr class="border-b border-cyan-500/40 text-cyan-200">
+                                    <th class="text-left py-2 pr-3">상태판</th><th class="text-left py-2 pr-3">정체</th><th class="text-left py-2 pr-3">진영</th><th class="text-left py-2">능력</th>
+                                </tr></thead>
+                                <tbody>
+                                    <tr class="border-b border-white/10"><td class="py-2 pr-3">🔴 모두 빨강</td><td class="py-2 pr-3"><strong class="text-red-400">에이온 (AEON)</strong></td><td class="py-2 pr-3 text-red-300">에이온</td><td class="py-2">밤마다 1명을 <strong>감염</strong></td></tr>
+                                    <tr class="border-b border-white/10"><td class="py-2 pr-3">🔵 모두 파랑</td><td class="py-2 pr-3"><strong class="text-blue-300">백신 개발자 (Vaccine Developer)</strong></td><td class="py-2 pr-3 text-blue-300">인류</td><td class="py-2">밤마다 1명에게 <strong>백신</strong>(감염 방어)</td></tr>
+                                    <tr><td class="py-2 pr-3">🔵🔴 섞임</td><td class="py-2 pr-3"><strong class="text-orange-300">과학자 (Scientist)</strong></td><td class="py-2 pr-3 text-blue-300">인류</td><td class="py-2">능력 없음, 순수 추리</td></tr>
+                                </tbody>
+                            </table>
                         </div>
+                        <p class="mt-3 text-gray-300"><strong>인류 진영 = 과학자 + 백신 개발자</strong>, <strong>에이온 진영 = 에이온.</strong> 파란 칩이 많을수록 인류에, 붉은 칩이 많을수록 에이온에 가깝습니다.</p>
                     </div>
                      <div>
-                        <h3 class="font-bold text-2xl text-cyan-300 mb-2 font-orbitron">4. 역할의 변화</h3>
-                        <p>게임 중 상태판의 모든 칩이 한 가지 색으로 통일되면 당신의 역할과 능력이 즉시 변경됩니다.</p>
+                        <h3 class="font-bold text-2xl text-cyan-300 mb-2 font-orbitron">4. 정체는 계속 바뀐다</h3>
+                        <p>상태판의 칩이 <strong>모두 한 색으로 통일되는 순간</strong> 정체와 능력이 즉시 바뀝니다.</p>
                          <ul class="list-disc list-inside mt-2 space-y-1">
-                             <li><strong class="text-red-400">새로운 에이온:</strong> 상태판이 모두 <span class="text-red-400">빨간색</span>이 되면, '에이온'이 되어 감염 능력을 얻습니다.</li>
-                              <li><strong class="text-blue-400">새로운 개발자:</strong> 상태판이 모두 <span class="text-blue-400">파란색</span>이 되면, '백신 개발자'가 되어 보호 능력을 얻습니다.</li>
-                              <li><strong class="text-gray-400">능력 상실:</strong> 에이온/개발자였더라도 상태판에 다른 색 칩이 생기면 능력을 잃고 일반 '과학자'가 됩니다.</li>
+                             <li>모두 <span class="text-red-400">🔴 빨강</span> → <strong class="text-red-400">에이온</strong>이 되어 감염 능력을 얻음</li>
+                              <li>모두 <span class="text-blue-400">🔵 파랑</span> → <strong class="text-blue-300">백신 개발자</strong>가 되어 보호 능력을 얻음</li>
+                              <li>에이온·개발자였어도 <strong>다른 색 칩이 생기면</strong> 능력을 잃고 <strong class="text-orange-300">과학자</strong>로 돌아감</li>
                          </ul>
                     </div>
                     <div>
                         <h3 class="font-bold text-2xl text-cyan-300 mb-2 font-orbitron">5. 게임 진행: 낮과 밤</h3>
                         <div class="space-y-4">
                             <div>
-                                <h4 class="font-bold text-xl text-yellow-300 mb-1">🌞 낮: 인지 치료</h4>
-                                <p>5분간 토론 후, 모든 생존자는 <strong class="text-yellow-300">'인지 치료제'</strong>를 투여할 1명을 투표합니다. 치료제는 감염된 <span class="text-red-400">에이온 칩</span> 1개를 <span class="text-blue-400">인류 칩</span>으로 되돌립니다. 동점 시 1명이 뽑힐 때까지 재투표합니다.</p>
+                                <h4 class="font-bold text-xl text-yellow-300 mb-1">🌞 낮: 인지 치료 (모두 함께)</h4>
+                                <p><strong>약 1분간 토론</strong>(호스트가 30초씩 연장 가능) 후, <strong>모든 생존자가 투표</strong>해 <strong class="text-yellow-300">'인지 치료제'</strong>를 투여할 1명을 정합니다. 치료제는 대상의 <span class="text-red-400">🔴빨간 칩</span> 1개를 <span class="text-blue-400">🔵파란 칩</span>으로 되돌립니다(치료). 동점 시 1명이 뽑힐 때까지 재투표합니다.</p>
                             </div>
                             <div>
-                                <h4 class="font-bold text-xl text-indigo-300 mb-1">🌚 밤: 비밀 활동</h4>
-                                <p>에이온은 <strong class="text-indigo-300">'정신 감염'</strong> 대상을, 개발자는 <strong class="text-indigo-300">'인지 백신'</strong> 투여 대상을 선택합니다.</p>
+                                <h4 class="font-bold text-xl text-indigo-300 mb-1">🌚 밤: 비밀 활동 (혼자서)</h4>
+                                <p>에이온은 <strong class="text-indigo-300">'정신 감염'</strong>, 백신 개발자는 <strong class="text-indigo-300">'인지 백신'</strong> 대상을 <strong>비밀리에</strong> 선택합니다. <span class="text-gray-400">(밤에는 토론 없이 바로 행동합니다.)</span></p>
                                 <ul class="list-disc list-inside mt-2 space-y-2 pl-2">
-                                    <li><strong class="text-red-400">감염:</strong> 대상의 <span class="text-blue-400">파란 칩</span> 1개가 <span class="text-red-400">빨간 칩</span>으로 바뀝니다.</li>
-                                    <li><strong class="text-blue-400">백신:</strong> 그 턴에 대상에게 가해지는 <strong class="text-red-400">모든 감염 시도</strong>를 무효화합니다.</li>
+                                    <li><strong class="text-red-400">🔴 감염(에이온):</strong> 대상의 <span class="text-blue-400">파란 칩</span> 1개 → <span class="text-red-400">빨간 칩</span></li>
+                                    <li><strong class="text-blue-300">🛡️ 백신(개발자):</strong> 그 밤 대상에게 오는 <strong class="text-red-400">모든 감염을 무효화</strong>(막기만 함, 칩 색은 안 바꿈)</li>
                                 </ul>
                             </div>
                         </div>
                     </div>
+                    <div>
+                        <h3 class="font-bold text-2xl text-yellow-200 mb-2 font-orbitron">⭐ 헷갈리지 마세요 — 치료제 vs 백신</h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-base border-collapse">
+                                <thead><tr class="border-b border-yellow-500/40 text-yellow-200">
+                                    <th class="text-left py-2 pr-3">구분</th><th class="text-left py-2 pr-3">🩹 치료제</th><th class="text-left py-2">🛡️ 백신</th>
+                                </tr></thead>
+                                <tbody>
+                                    <tr class="border-b border-white/10"><td class="py-2 pr-3 text-gray-400">시점</td><td class="py-2 pr-3"><strong>낮</strong></td><td class="py-2"><strong>밤</strong></td></tr>
+                                    <tr class="border-b border-white/10"><td class="py-2 pr-3 text-gray-400">누가</td><td class="py-2 pr-3">모든 생존자 투표 <span class="text-gray-400">(공개)</span></td><td class="py-2">백신 개발자 혼자 <span class="text-gray-400">(비밀)</span></td></tr>
+                                    <tr class="border-b border-white/10"><td class="py-2 pr-3 text-gray-400">효과</td><td class="py-2 pr-3">🔴칩 1개 → 🔵 (<strong>정체를 되돌림</strong>)</td><td class="py-2">그 밤의 <strong>감염을 막음</strong> (칩은 그대로)</td></tr>
+                                    <tr><td class="py-2 pr-3 text-gray-400">한마디</td><td class="py-2 pr-3">이미 오염된 걸 <strong>치료</strong></td><td class="py-2">오염을 미리 <strong>예방·방어</strong></td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="mt-3 text-gray-300">즉 <strong>치료제는 이미 물든 칩을 되돌리고</strong>, <strong>백신은 그날 밤 감염 자체를 막습니다.</strong> 백신은 칩 색을 바꾸지 않아요.</p>
+                    </div>
                      <div>
-                        <h3 class="font-bold text-2xl text-purple-300 mb-2 font-orbitron">👹 특별 역할: 도깨비 (Demon)</h3>
+                        <h3 class="font-bold text-2xl text-purple-300 mb-2 font-orbitron">7. 👹 특별 역할: 도깨비 (Demon)</h3>
                         <p>호스트가 대기방에서 켤 수 있는 선택 규칙입니다. (클래식 모드 · <strong>5명 이상 홀수 인원</strong>일 때만)</p>
                         <ul class="list-disc list-inside mt-2 space-y-1">
                             <li>게임 시작 시 과학자 중 <strong>1명이 몰래 도깨비</strong>가 됩니다. 도깨비가 있다는 사실은 모두가 알지만, 누구인지는 비밀입니다.</li>
@@ -4159,7 +4184,7 @@
                         </ul>
                     </div>
                     <div>
-                        <h3 class="font-bold text-2xl text-yellow-300 mb-2 font-orbitron">🏅 노벨상 (승리코인)</h3>
+                        <h3 class="font-bold text-2xl text-yellow-300 mb-2 font-orbitron">8. 🏅 노벨상 (승리코인)</h3>
                         <p>같은 방에서 여러 판을 이어서 할 때, 판마다 승리한 플레이어는 <strong class="text-yellow-300">노벨상 1개</strong>를 받습니다. (도깨비 단독 승리는 <strong>2개</strong>)</p>
                         <ul class="list-disc list-inside mt-2 space-y-1">
                             <li>대기방에서 닉네임 아래 🏅로 표시되며, 노벨상을 가장 많이 모은 사람이 그날의 최종 우승자입니다.</li>
@@ -4168,7 +4193,7 @@
                         </ul>
                     </div>
                      <div>
-                        <h3 class="font-bold text-2xl text-cyan-300 mb-2 font-orbitron">6. 카오스 모드 카드 사용법</h3>
+                        <h3 class="font-bold text-2xl text-cyan-300 mb-2 font-orbitron">9. 카오스 모드 카드 사용법</h3>
                         <div class="space-y-4">
                             <div>
                                 <h4 class="font-bold text-xl text-yellow-300">정보전 카드</h4>
