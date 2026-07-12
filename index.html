@@ -30,9 +30,13 @@
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
         let observationResultTimer = null; // 측정 완료 후 결과 공개 예약 타이머(중복/경쟁 방지)
-        const APP_VERSION = 'v1.34'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
+        const APP_VERSION = 'v1.35'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
         // 최근 업데이트 이력(최신순, 최근 5개 유지)
         const CHANGELOG = [
+            { v: 'v1.35', date: '2026-07-12', items: [
+                '게임 시작 직전 "화면을 벗어나지 마세요" 안내 화면 추가',
+                '다른 앱/창에서 돌아오면 자동으로 연결·상태 재동기화(멈춤/튕김 완화)',
+            ]},
             { v: 'v1.34', date: '2026-07-12', items: [
                 '인트로 이미지 2장 추가(총 4장) + 매번 무작위 순서로 표시',
                 '대기방 전용 배경음악 추가 (Whispers in the Lobby)',
@@ -48,9 +52,6 @@
             { v: 'v1.31', date: '2026-07-11', items: [
                 '첫 화면 인트로 이미지 2장 기본 탑재(슬라이드쇼)',
                 '메뉴 배경음악 교체 (Quantum Mapletown)',
-            ]},
-            { v: 'v1.30', date: '2026-07-11', items: [
-                '메뉴 배경음악 추가 — 대기방 입장 전(첫 화면~방 목록)까지만 재생',
             ]},
         ];
         let submittedActionToken = null; // 이번 단계에 투표/행동을 보냈는지 추적(반영 안 되면 다시 안내)
@@ -529,6 +530,7 @@
                          } else { // 호스트는 바로 게임 화면으로
                              showScreen('game-screen');
                              updateGameUI(currentRoomData);
+                             showGameWarning();
                          }
                     } else {
                         // 일반적인 UI 업데이트
@@ -2700,7 +2702,18 @@
                 popup.classList.add('hidden');
                 showScreen('game-screen');
                 updateGameUI(currentRoomData);
+                showGameWarning();
             }, amIDemon ? 8000 : 4000); // 도깨비는 읽을 시간을 더 줌
+        }
+
+        function showGameWarning() {
+            const el = document.getElementById('game-warning-overlay');
+            if (el) el.classList.remove('hidden');
+        }
+        function hideGameWarning() {
+            playSound('click');
+            const el = document.getElementById('game-warning-overlay');
+            if (el) el.classList.add('hidden');
         }
 
         function showPhaseTransition(message) {
@@ -3138,6 +3151,17 @@
                             updateDoc(roomRef, { [`players.${auth.currentUser.uid}`]: deleteField() });
                         }
                     } catch (e) { /* best-effort */ }
+                }
+            });
+
+            document.getElementById('gw-confirm-btn').addEventListener('click', hideGameWarning);
+
+            // 백그라운드(다른 앱/창)에서 돌아오면 방 상태를 강제로 다시 동기화
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible' && currentRoomId) {
+                    // 끊겼을 수 있는 실시간 연결을 다시 붙이고 최신 상태로 갱신
+                    subscribeToRoom(currentRoomId);
+                    updateMenuMusic(document.querySelector('.screen:not(.hidden)')?.id);
                 }
             });
 
@@ -3664,6 +3688,43 @@
             margin-bottom: 1.6rem;
         }
 
+        /* ===== 게임 시작 직전 안내 오버레이 ===== */
+        #game-warning-overlay {
+            position: fixed; inset: 0; z-index: 130;
+            display: flex; align-items: center; justify-content: center; padding: 20px;
+            background: radial-gradient(ellipse at center, rgba(20,16,10,0.94), rgba(6,5,3,0.98));
+            animation: fade-in 0.3s ease-out;
+        }
+        #game-warning-overlay.hidden { display: none; }
+        .gw-card {
+            width: 100%; max-width: 440px; text-align: center;
+            background-image: linear-gradient(150deg, var(--panel-1, #201a10), var(--panel-2, #14100a));
+            border: 1px solid rgba(201, 162, 75, 0.5);
+            border-radius: 1.1rem; padding: 2rem 1.6rem;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.6), inset 0 0 30px rgba(201,162,75,0.06);
+        }
+        .gw-icon { font-size: 2.6rem; margin-bottom: 0.6rem; }
+        .gw-title {
+            font-family: var(--font-title); font-weight: 800;
+            font-size: clamp(1.5rem, 6vw, 2rem); line-height: 1.25;
+            color: #ffcf6b; text-shadow: 0 2px 12px rgba(255,180,60,0.4);
+            margin-bottom: 1rem;
+        }
+        .gw-desc {
+            font-size: 0.92rem; line-height: 1.65; color: #d9cdb2;
+            margin-bottom: 1.6rem;
+        }
+        .gw-desc b { color: #ffe0a3; }
+        .gw-btn {
+            width: 100%; padding: 0.95rem; border-radius: 0.7rem; border: none; cursor: pointer;
+            font-family: var(--font-title); font-weight: 700; font-size: 1.05rem; letter-spacing: 0.02em;
+            color: #2a1e08; background-image: linear-gradient(180deg, #ffd888, #e6b64e);
+            box-shadow: 0 6px 18px rgba(230,182,78,0.35), inset 0 1px 0 rgba(255,255,255,0.5);
+            transition: transform 0.12s ease;
+        }
+        .gw-btn:hover { transform: translateY(-2px); }
+        .gw-btn:active { transform: scale(0.97); }
+
         /* 첫 화면 업데이트 이력 탭 */
         #update-tab {
             position: fixed;
@@ -4124,6 +4185,16 @@
         <!-- 배경음악: 메뉴(입장 전) / 로비(대기방) -->
         <audio id="menu-bgm" src="main_theme.mp3" loop preload="auto"></audio>
         <audio id="lobby-bgm" src="lobby_theme.mp3" loop preload="auto"></audio>
+
+        <!-- 게임 시작 직전 안내 오버레이 -->
+        <div id="game-warning-overlay" class="hidden">
+            <div class="gw-card">
+                <div class="gw-icon">📱⚠️</div>
+                <h2 class="gw-title">게임 화면을<br>벗어나지 마세요!</h2>
+                <p class="gw-desc">게임 중에 <b>유튜브·카톡 등 다른 앱이나 창</b>으로 넘어가면,<br>휴대폰이 이 화면을 잠시 멈춰 <b>진행이 끊기거나 튕길 수</b> 있어요.<br>게임이 끝날 때까지 이 화면에 머물러 주세요.</p>
+                <button id="gw-confirm-btn" class="gw-btn">확인하고 시작하기</button>
+            </div>
+        </div>
 
         <!-- 첫 화면 업데이트 이력 탭 -->
         <button id="update-tab" class="hidden">📋 업데이트</button>
