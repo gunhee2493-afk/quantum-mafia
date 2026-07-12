@@ -30,9 +30,12 @@
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
         let observationResultTimer = null; // 측정 완료 후 결과 공개 예약 타이머(중복/경쟁 방지)
-        const APP_VERSION = 'v1.35'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
+        const APP_VERSION = 'v1.36'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
         // 최근 업데이트 이력(최신순, 최근 5개 유지)
         const CHANGELOG = [
+            { v: 'v1.36', date: '2026-07-12', items: [
+                '폰에서 개발자 모드 켜기: 메인 화면 \'SOLVAY 1927\' 명판을 빠르게 7번 탭',
+            ]},
             { v: 'v1.35', date: '2026-07-12', items: [
                 '게임 시작 직전 "화면을 벗어나지 마세요" 안내 화면 + 딴 앱 갔다 와도 자동 재동기화, 화면 꺼짐 방지',
                 '룰 변경: 도깨비 없는 판에서 동점이면 인류(과학자) 승리',
@@ -50,10 +53,6 @@
             { v: 'v1.32', date: '2026-07-11', items: [
                 '👹 도깨비 역할 추가 — 호스트가 대기방에서 생성(클래식·5명 이상 홀수), 최종 측정 동점이면 단독 승리',
                 '🏅 노벨상(승리코인) — 판마다 승자에게 1개(도깨비 2개), 대기방에 누적 표시, 호스트 수동 부여 가능',
-            ]},
-            { v: 'v1.31', date: '2026-07-11', items: [
-                '첫 화면 인트로 이미지 2장 기본 탑재(슬라이드쇼)',
-                '메뉴 배경음악 교체 (Quantum Mapletown)',
             ]},
         ];
         let submittedActionToken = null; // 이번 단계에 투표/행동을 보냈는지 추적(반영 안 되면 다시 안내)
@@ -2737,6 +2736,27 @@
             }, amIDemon ? 8000 : 4000); // 도깨비는 읽을 시간을 더 줌
         }
 
+        // 폰에서 개발자 모드 켜기: 메인 화면 'SOLVAY 1927' 명판을 3초 안에 7번 탭
+        let devTapCount = 0, devTapTimer = null;
+        window.secretDevTap = () => {
+            devTapCount++;
+            clearTimeout(devTapTimer);
+            devTapTimer = setTimeout(() => { devTapCount = 0; }, 3000);
+            if (devTapCount >= 3 && devTapCount < 7) {
+                showToast(`개발자 모드까지 ${7 - devTapCount}번…`);
+            }
+            if (devTapCount >= 7) {
+                devTapCount = 0;
+                let on = false;
+                try { on = localStorage.getItem('aeon_dev') === '1'; } catch (e) {}
+                try {
+                    if (on) { localStorage.removeItem('aeon_dev'); } else { localStorage.setItem('aeon_dev', '1'); }
+                } catch (e) {}
+                showCustomAlert(`개발자 모드가 <b>${on ? '꺼졌' : '켜졌'}</b>습니다.<br>새로고침 후 적용됩니다.`);
+                setTimeout(() => location.reload(), 1200);
+            }
+        };
+
         // 화면 꺼짐 방지(지원 기기 한정) — 게임 중 화면이 자동으로 꺼지지 않게
         let wakeLock = null;
         async function requestWakeLock() {
@@ -3855,7 +3875,7 @@
                  <div class="title-banner">
                      <h1>AEON INVASION</h1>
                  </div>
-                 <p class="solvay-plaque">SOLVAY CONFERENCE · 1927 · BRUSSELS</p>
+                 <p class="solvay-plaque" onclick="secretDevTap()" style="cursor:pointer;user-select:none;">SOLVAY CONFERENCE · 1927 · BRUSSELS</p>
                  <div class="space-y-4">
                       <button id="create-room-btn" class="w-full btn-primary text-xl sm:text-2xl py-3 sm:py-4">
                            게임방 만들기
