@@ -34,8 +34,10 @@
         // 최근 업데이트 이력(최신순, 최근 5개 유지)
         const CHANGELOG = [
             { v: 'v1.35', date: '2026-07-12', items: [
-                '게임 시작 직전 "화면을 벗어나지 마세요" 안내 화면 추가',
-                '다른 앱/창에서 돌아오면 자동으로 연결·상태 재동기화(멈춤/튕김 완화)',
+                '게임 시작 직전 "화면을 벗어나지 마세요" 안내 화면 + 딴 앱 갔다 와도 자동 재동기화, 화면 꺼짐 방지',
+                '룰 변경: 도깨비 없는 판에서 동점이면 인류(과학자) 승리',
+                '로비에서 플레이어 칸을 누르면 강퇴·준비 대신·노벨상 메뉴(터치 쉽게), 봇 추가 버튼 확대',
+                '개발자 모드 기기 저장(폰에서 주소 파라미터 없어도 유지)',
             ]},
             { v: 'v1.34', date: '2026-07-12', items: [
                 '인트로 이미지 2장 추가(총 4장) + 매번 무작위 순서로 표시',
@@ -607,28 +609,23 @@
             const nobelMap = room.nobelPrizes || {};
             playerList.forEach(p => {
                     const isEntangled = entangledPlayerIds.includes(p.id);
-                    const kickBtn = localPlayer.isHost ? `<button onclick="kickPlayer('${p.id}')" title="강퇴" class="ml-2 text-red-400 hover:text-red-300 text-sm font-bold">✕</button>` : '';
-                    // 노벨상(승리코인) 표시: 5개까지는 메달 아이콘, 그 이상은 ×N
                     const nobel = nobelMap[p.id] || 0;
                     const nobelHtml = nobel > 0
                         ? `<div class="mt-1 text-sm" title="노벨상 ${nobel}개">${nobel <= 5 ? '🏅'.repeat(nobel) : `🏅×${nobel}`}</div>`
                         : '';
-                    // 호스트 전용: 노벨상 수동 부여/차감 (팅김·중간입장 보정용)
-                    const nobelCtrl = localPlayer.isHost
-                        ? `<span class="ml-2 whitespace-nowrap"><button onclick="grantNobel('${p.id}', 1)" title="노벨상 +1" class="text-yellow-400 hover:text-yellow-200 text-xs font-bold border border-yellow-500/40 rounded px-1">🏅+</button><button onclick="grantNobel('${p.id}', -1)" title="노벨상 -1" class="ml-1 text-gray-400 hover:text-gray-200 text-xs font-bold border border-gray-500/40 rounded px-1">−</button></span>`
-                        : '';
+                    // 호스트는 플레이어 칸 전체를 눌러 관리 메뉴(강퇴/준비 대신/노벨상)를 연다 → 터치하기 쉬움
+                    const clickable = localPlayer.isHost ? `onclick="openLobbyPlayerMenu('${p.id}')" class="bg-black/20 p-4 rounded-lg shadow-inner-dark cursor-pointer hover:bg-black/30 active:scale-[0.98] transition"` : `class="bg-black/20 p-4 rounded-lg shadow-inner-dark"`;
                     playerSlotsEl.innerHTML += `
-                        <div class="bg-black/20 p-4 rounded-lg shadow-inner-dark">
+                        <div ${clickable}>
                              <div class="flex items-center justify-between">
                                  <div class="flex items-center space-x-3">
                                      <div class="bg-orange-500 text-white font-bold rounded-full w-8 h-8 flex items-center justify-center text-lg shadow-lg">${p.number}</div>
                                      <span class="text-white text-lg font-bold">${p.nickname}</span>
                                      ${isEntangled ? '<span title="양자 얽힘 상태">🔗</span>' : ''}
                                  </div>
-                                 <div class="flex items-center">
+                                 <div class="flex items-center gap-1">
                                      <span class="${p.isReady ? 'text-cyan-400' : 'text-gray-400'} font-bold">${p.isReady ? '준비완료' : '대기중'}</span>
-                                     ${nobelCtrl}
-                                     ${kickBtn}
+                                     ${localPlayer.isHost ? '<span class="text-gray-500 text-xs">⚙️</span>' : ''}
                                  </div>
                              </div>
                              ${nobelHtml}
@@ -638,7 +635,7 @@
             const emptySlotsCount = maxPlayers - playerCount;
              for (let i = 0; i < emptySlotsCount; i++) {
                  if (isDevMode && localPlayer.isHost) {
-                      playerSlotsEl.innerHTML += `<button onclick="addBotPlayer()" class="bg-green-800/20 p-4 rounded-lg flex items-center justify-center border-2 border-dashed border-green-600/50 hover:bg-green-700/30 transition-colors"><span class="text-green-400">봇 추가</span></button>`;
+                      playerSlotsEl.innerHTML += `<button onclick="addBotPlayer()" class="bg-green-800/30 p-4 rounded-lg flex items-center justify-center border-2 border-dashed border-green-500/60 hover:bg-green-700/40 active:scale-95 transition-colors min-h-[64px]"><span class="text-green-300 font-bold text-lg">🤖 봇 추가</span></button>`;
                  } else {
                       playerSlotsEl.innerHTML += `<div class="bg-black/20 p-4 rounded-lg flex items-center justify-center border-2 border-dashed border-gray-600/50"><span class="text-gray-500">빈 슬롯</span></div>`;
                  }
@@ -2082,7 +2079,7 @@
 
             // 👹 도깨비 승리: 정확히 동점이면 양 진영 모두 패배, 도깨비 단독 승리
             const demonWin = !!demon && aeonCount === citizenCount;
-            const winTeam = aeonCount >= citizenCount ? 'AEON' : 'CITIZEN'; // 도깨비 없을 때 동점=에이온(기존 룰)
+            const winTeam = aeonCount > citizenCount ? 'AEON' : 'CITIZEN'; // 도깨비 없을 때 동점=인류(과학자) 승리
 
             let winnerList = [];
             if (demonWin) {
@@ -2183,6 +2180,40 @@
         }
 
         // --- 호스트 강퇴 ---
+        // 호스트: 로비에서 플레이어 칸을 누르면 뜨는 관리 메뉴 (강퇴 / 준비 대신 / 노벨상)
+        window.openLobbyPlayerMenu = (playerId) => {
+            if (!currentRoomId || !localPlayer.isHost || !playerId) return;
+            const p = currentRoomData?.players?.[playerId];
+            if (!p) return;
+            playSound('popupOpen');
+            const nobel = currentRoomData?.nobelPrizes?.[playerId] || 0;
+            const readyLabel = p.isReady ? '준비 해제' : '준비하기';
+            showCustomAlertWithHTML(`
+                <div class="text-xl font-bold mb-1">${p.number}. ${p.nickname}</div>
+                <div class="text-sm text-yellow-300 mb-4">🏅 노벨상 ${nobel}개</div>
+                <div class="flex flex-col gap-2">
+                    <button onclick="hostSetReady('${playerId}'); hideCustomAlert();" class="w-full py-3 rounded-lg font-bold ${p.isReady ? 'bg-gray-600 hover:bg-gray-500' : 'bg-cyan-600 hover:bg-cyan-500'} text-white">✔ ${readyLabel} (대신)</button>
+                    <div class="flex gap-2">
+                        <button onclick="grantNobel('${playerId}', 1); hideCustomAlert();" class="flex-1 py-3 rounded-lg font-bold bg-yellow-600 hover:bg-yellow-500 text-black">🏅 노벨상 +1</button>
+                        <button onclick="grantNobel('${playerId}', -1); hideCustomAlert();" class="flex-1 py-3 rounded-lg font-bold bg-gray-700 hover:bg-gray-600 text-white">🏅 −1</button>
+                    </div>
+                    <button onclick="kickPlayer('${playerId}');" class="w-full py-3 rounded-lg font-bold bg-red-700 hover:bg-red-600 text-white">✕ 강퇴하기</button>
+                    <button onclick="hideCustomAlert()" class="w-full py-2 rounded-lg btn-secondary mt-1">닫기</button>
+                </div>`);
+        };
+
+        // 호스트가 특정 플레이어의 준비 상태를 대신 토글
+        window.hostSetReady = async (playerId) => {
+            if (!currentRoomId || !localPlayer.isHost || !playerId) return;
+            const p = currentRoomData?.players?.[playerId];
+            if (!p) return;
+            playSound('click');
+            try {
+                await updateDoc(doc(db, 'rooms', currentRoomId), { [`players.${playerId}.isReady`]: !p.isReady });
+                showToast(`${p.nickname}: ${!p.isReady ? '준비완료' : '대기중'}`);
+            } catch (e) { console.error('준비 대신 설정 실패:', e); }
+        };
+
         window.kickPlayer = (playerId) => {
             if (!currentRoomId || !localPlayer.isHost || !playerId) return;
             const p = currentRoomData?.players?.[playerId];
@@ -2706,7 +2737,18 @@
             }, amIDemon ? 8000 : 4000); // 도깨비는 읽을 시간을 더 줌
         }
 
+        // 화면 꺼짐 방지(지원 기기 한정) — 게임 중 화면이 자동으로 꺼지지 않게
+        let wakeLock = null;
+        async function requestWakeLock() {
+            try {
+                if ('wakeLock' in navigator && document.visibilityState === 'visible') {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                }
+            } catch (e) { /* 미지원/거부 시 무시 */ }
+        }
+
         function showGameWarning() {
+            requestWakeLock();
             const el = document.getElementById('game-warning-overlay');
             if (el) el.classList.remove('hidden');
         }
@@ -3012,9 +3054,13 @@
             initializeSounds();
             startStarfield(); 
 
-            // URL 파라미터로 개발자 모드 확인
+            // URL 파라미터로 개발자 모드 확인 (한 번 켜면 이 기기에 저장 → 폰에서 주소 파라미터가 사라져도 유지)
             const urlParams = new URLSearchParams(window.location.search);
-            isDevMode = urlParams.get('dev') === 'true';
+            if (urlParams.get('dev') === 'true') { try { localStorage.setItem('aeon_dev', '1'); } catch (e) {} }
+            if (urlParams.get('dev') === 'false') { try { localStorage.removeItem('aeon_dev'); } catch (e) {} }
+            let devSaved = false;
+            try { devSaved = localStorage.getItem('aeon_dev') === '1'; } catch (e) {}
+            isDevMode = urlParams.get('dev') === 'true' || devSaved;
             if (isDevMode) {
                 console.warn("개발자 모드가 활성화되었습니다.");
                 const vb = document.getElementById('version-badge');
@@ -3151,6 +3197,25 @@
                             updateDoc(roomRef, { [`players.${auth.currentUser.uid}`]: deleteField() });
                         }
                     } catch (e) { /* best-effort */ }
+                }
+            });
+
+            // --- 백그라운드에서 돌아왔을 때 즉시 재동기화(폰에서 딴 창 갔다 와도 멈추지 않게) ---
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible') {
+                    requestWakeLock();
+                    if (currentRoomId) {
+                        // 최신 상태 강제 반영 + 끊겼을 수 있는 실시간 구독 재연결
+                        subscribeToRoom(currentRoomId);
+                        getDoc(doc(db, 'rooms', currentRoomId)).then(snap => {
+                            if (snap.exists()) {
+                                currentRoomData = snap.data();
+                                const amIHost = auth.currentUser && currentRoomData.host?.id === auth.currentUser.uid;
+                                if (currentRoomData.status === 'playing') updateGameUI(currentRoomData);
+                                else if (currentRoomData.status === 'waiting') { showScreen('lobby-screen'); updateLobbyUI(currentRoomData); }
+                            }
+                        }).catch(() => {});
+                    }
                 }
             });
 
@@ -4019,7 +4084,7 @@
                         <p>설정된 라운드(4~6)가 모두 종료되면, 살아남은 과학자들의 최종 신원을 '측정'하여 인류 진영과 에이온 진영의 수를 비교하고, 수가 더 많은 진영이 승리합니다.</p>
                         <ul class="list-disc list-inside mt-2 space-y-1">
                             <li><strong>최종 측정(Measurement)이란?</strong>: 게임이 끝나면 각자의 '양자 상태판'은 여러 가능성이 중첩된 하나의 확률로 존재합니다. '측정'은 이 불확실한 상태를 관측하여 하나의 결과(인류 과학자 또는 에이온 스파이)로 확정하는 과정입니다. 상태판의 붉은 칩(에이온) 비율이 높을수록 측정 시 에이온으로 밝혀질 확률이 높아집니다.</li>
-                            <li><strong>무승부 규칙:</strong> 만약 최종 생존자의 인류 진영과 에이온 진영 수가 같다면, 인류의 과학 발전을 막으려는 에이온의 목적이 일부 달성된 것으로 간주하여 <strong class="text-red-400">에이온 진영의 승리</strong>가 됩니다.</li>
+                            <li><strong>무승부 규칙:</strong> 만약 최종 생존자의 인류 진영과 에이온 진영 수가 같다면(동점), <strong class="text-blue-400">인류 진영의 승리</strong>가 됩니다. (단, 도깨비가 있는 판에서는 동점 시 도깨비가 단독 승리합니다.)</li>
                         </ul>
                     </div>
                     <div>
