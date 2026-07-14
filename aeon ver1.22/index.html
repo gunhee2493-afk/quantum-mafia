@@ -4,6 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>양자 마피아: 에이온 침략전</title>
+    <!-- PWA: 홈 화면에 앱으로 설치 -->
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#101a2e">
+    <link rel="icon" type="image/svg+xml" href="/icon.svg">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="AEON">
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -30,9 +39,12 @@
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
         let observationResultTimer = null; // 측정 완료 후 결과 공개 예약 타이머(중복/경쟁 방지)
-        const APP_VERSION = 'v1.39'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
+        const APP_VERSION = 'v1.40'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
         // 최근 업데이트 이력(최신순, 최근 5개 유지)
         const CHANGELOG = [
+            { v: 'v1.40', date: '2026-07-14', items: [
+                '📱 홈 화면에 앱으로 설치 가능(PWA) — 커스텀 에이온 아이콘, 앱 이름 "AEON", 전체화면 실행',
+            ]},
             { v: 'v1.39', date: '2026-07-12', items: [
                 '룰북 정리: 정체=상태판 표로 통일, "백신 개발자" 명칭 통일, 치료제 vs 백신 비교표 추가, 낮 토론 시간 수정',
                 '첫 화면 하단 고정 버전표기(aeon ver) 제거',
@@ -43,9 +55,6 @@
             ]},
             { v: 'v1.37', date: '2026-07-12', items: [
                 '개발자 모드가 기기에 영구 저장되던 문제 수정 — 이제 이 세션에서만 유지(앱 종료 시 자동 해제)',
-            ]},
-            { v: 'v1.36', date: '2026-07-12', items: [
-                '폰에서 개발자 모드 켜기: 메인 화면 \'SOLVAY 1927\' 명판을 빠르게 7번 탭',
             ]},
             { v: 'v1.35', date: '2026-07-12', items: [
                 '게임 시작 직전 "화면을 벗어나지 마세요" 안내 화면 + 딴 앱 갔다 와도 자동 재동기화, 화면 꺼짐 방지',

@@ -1,0 +1,16 @@
+{
+  "name": "양자 마피아: 에이온 침략전",
+  "short_name": "AEON",
+  "description": "1927 솔베이 회의를 배경으로 한 양자역학 소셜 추리 게임",
+  "lang": "ko",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0e0b08",
+  "theme_color": "#101a2e",
+  "icons": [
+    { "src": "/icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any" },
+    { "src": "/apple-touch-icon.png", "type": "image/png", "sizes": "180x180", "purpose": "any" }
+  ]
+}
