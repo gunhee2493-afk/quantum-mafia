@@ -40,9 +40,12 @@
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
         let observationResultTimer = null; // 측정 완료 후 결과 공개 예약 타이머(중복/경쟁 방지)
-        const APP_VERSION = 'v1.42'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
+        const APP_VERSION = 'v1.43'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
         // 최근 업데이트 이력(최신순, 최근 5개 유지)
         const CHANGELOG = [
+            { v: 'v1.43', date: '2026-07-14', items: [
+                '제작자 로고 추가 — 메인 메뉴 하단에 양자과학교사연구회 원형 로고',
+            ]},
             { v: 'v1.42', date: '2026-07-14', items: [
                 '개발자 모드: 호스트가 아니어도 각자 봇을 추가하고, 자기가 만든 봇만 직접 조종',
             ]},
@@ -55,10 +58,6 @@
             { v: 'v1.39', date: '2026-07-12', items: [
                 '룰북 정리: 정체=상태판 표로 통일, "백신 개발자" 명칭 통일, 치료제 vs 백신 비교표 추가, 낮 토론 시간 수정',
                 '첫 화면 하단 고정 버전표기(aeon ver) 제거',
-            ]},
-            { v: 'v1.38', date: '2026-07-12', items: [
-                '투표·행동 제한시간 90초 → 60초, 호스트 "+30초" 연장 버튼을 투표·행동에도 적용',
-                '투표·행동이 모두 완료되면 즉시 다음 단계로 진행',
             ]},
         ];
         let submittedActionToken = null; // 이번 단계에 투표/행동을 보냈는지 추적(반영 안 되면 다시 안내)
@@ -3898,6 +3897,28 @@
         #update-tab:hover { background: linear-gradient(180deg, rgba(64,54,40,0.98), rgba(36,29,20,0.98)); box-shadow: 0 4px 14px rgba(201,162,75,0.25); }
         #update-tab:active { transform: scale(0.96); }
 
+        /* 제작자(양자과학교사연구회) 크레딧 */
+        .creator-credit {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 20px;
+            padding-top: 14px;
+            border-top: 1px solid rgba(201, 162, 75, 0.2);
+            color: rgba(233, 221, 199, 0.6);
+            font-size: 0.8rem;
+            letter-spacing: 0.03em;
+        }
+        .creator-logo {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 1px solid rgba(201, 162, 75, 0.5);
+            box-shadow: 0 0 8px rgba(0, 0, 0, 0.4);
+        }
+
         #version-badge {
             position: fixed;
             right: 6px;
@@ -3953,6 +3974,10 @@
                       <button onclick="showQrPopup()" class="w-full btn-secondary text-lg sm:text-xl py-2 sm:py-3">📱 QR로 친구 초대</button>
                       <button id="dev-clear-rooms-btn" class="hidden w-full bg-red-700/80 hover:bg-red-600 text-white font-bold py-2 rounded-lg text-sm">[DEV] 유령방 전체 삭제</button>
                       <button id="dev-intro-btn" class="hidden w-full bg-indigo-700/80 hover:bg-indigo-600 text-white font-bold py-2 rounded-lg text-sm">[DEV] 인트로 이미지 관리</button>
+                 </div>
+                 <div class="creator-credit">
+                     <img src="creator_logo.png" alt="양자과학교사연구회" class="creator-logo">
+                     <span>양자과학교사연구회</span>
                  </div>
             </div>
         </div>
