@@ -40,9 +40,13 @@
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
         let observationResultTimer = null; // 측정 완료 후 결과 공개 예약 타이머(중복/경쟁 방지)
-        const APP_VERSION = 'v1.43'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
+        const APP_VERSION = 'v1.44'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
         // 최근 업데이트 이력(최신순, 최근 5개 유지)
         const CHANGELOG = [
+            { v: 'v1.44', date: '2026-07-14', items: [
+                '개발자 모드: 봇 자동/수동 조종 토글(자동이면 봇이 무작위로 투표·행동)',
+                '개발자 모드: 방 관리 — 방별 선택 삭제 + 전체 삭제',
+            ]},
             { v: 'v1.43', date: '2026-07-14', items: [
                 '제작자 로고 추가 — 메인 메뉴 하단에 양자과학교사연구회 원형 로고',
             ]},
@@ -54,10 +58,6 @@
             ]},
             { v: 'v1.40', date: '2026-07-14', items: [
                 '📱 홈 화면에 앱으로 설치 가능(PWA) — 커스텀 에이온 아이콘, 앱 이름 "AEON", 전체화면 실행',
-            ]},
-            { v: 'v1.39', date: '2026-07-12', items: [
-                '룰북 정리: 정체=상태판 표로 통일, "백신 개발자" 명칭 통일, 치료제 vs 백신 비교표 추가, 낮 토론 시간 수정',
-                '첫 화면 하단 고정 버전표기(aeon ver) 제거',
             ]},
         ];
         let submittedActionToken = null; // 이번 단계에 투표/행동을 보냈는지 추적(반영 안 되면 다시 안내)
@@ -704,6 +704,13 @@
             const demonNotice = document.getElementById('demon-notice');
             if (demonNotice) demonNotice.classList.toggle('hidden', !room.demonEnabled);
 
+            // 봇 자동/수동 토글: 개발자 모드 호스트에게만
+            const autoBotBtn = document.getElementById('autobot-toggle-btn');
+            if (autoBotBtn) {
+                autoBotBtn.classList.toggle('hidden', !(isDevMode && localPlayer.isHost));
+                autoBotBtn.innerHTML = room.autoBots ? '🤖 봇 조종: 자동 (끄면 수동)' : '🤖 봇 조종: 수동 (켜면 자동)';
+            }
+
             document.getElementById('ready-btn').classList.toggle('hidden', localPlayer.isHost);
             document.getElementById('start-game-btn').classList.toggle('hidden', !localPlayer.isHost);
 
@@ -1042,6 +1049,7 @@
         
         function updateHostGameView(room) {
             const { players, gameState, votes, nightActions, totalRounds, entangledPairs } = room;
+            autoPlayBots(room); // 봇 자동 진행(켜져 있으면)
             
             document.getElementById('hud-player-info').innerHTML = `<span class="font-bold text-lg sm:text-2xl">HOST</span> ${localPlayer.nickname}`;
             
@@ -2359,6 +2367,58 @@
             }
         };
 
+        // ===== 봇 자동 진행 (호스트가 봇들을 무작위로 투표/행동) =====
+        let autoBotTimers = {};
+        let autoBotPhaseKey = null;
+        function autoPlayBots(room) {
+            if (!isDevMode || !localPlayer.isHost || !room || !room.autoBots) return;
+            const gs = room.gameState;
+            if (!gs || (gs.subPhase !== 'VOTE' && gs.subPhase !== 'ACTION')) return;
+            const key = `${gs.round}|${gs.phase}|${gs.subPhase}|${gs.timerEndAt || ''}`;
+            if (autoBotPhaseKey !== key) { // 새 단계 → 이전 예약 초기화
+                Object.values(autoBotTimers).forEach(t => clearTimeout(t));
+                autoBotTimers = {};
+                autoBotPhaseKey = key;
+            }
+            const players = room.players;
+            const living = Object.values(players).filter(p => p.isAlive);
+            const bots = living.filter(p => p.id.startsWith('bot'));
+            const rand = (arr) => arr[Math.floor(Math.random() * arr.length)];
+            bots.forEach(b => {
+                if (autoBotTimers[b.id]) return;
+                if (gs.subPhase === 'VOTE') {
+                    if (room.votes && room.votes[b.id]) return;
+                    let cands = living;
+                    if (gs.revoteCandidates && gs.revoteCandidates.length) cands = living.filter(p => gs.revoteCandidates.includes(p.id));
+                    if (!cands.length) return;
+                    const target = rand(cands);
+                    autoBotTimers[b.id] = setTimeout(() => {
+                        delete autoBotTimers[b.id];
+                        updateDoc(doc(db, 'rooms', currentRoomId), { [`votes.${b.id}`]: target.id }).catch(() => {});
+                    }, 700 + Math.random() * 1400);
+                } else { // ACTION
+                    if (b.currentRole === 'CITIZEN') return; // 시민 봇은 행동 없음
+                    if (room.nightActions && room.nightActions[b.id]) return;
+                    let cands = living.filter(p => p.id !== b.id);
+                    if (!cands.length) cands = living;
+                    const target = rand(cands);
+                    autoBotTimers[b.id] = setTimeout(() => {
+                        delete autoBotTimers[b.id];
+                        updateDoc(doc(db, 'rooms', currentRoomId), { [`nightActions.${b.id}`]: { targetIds: [target.id] } }).catch(() => {});
+                    }, 700 + Math.random() * 1400);
+                }
+            });
+        }
+        // 호스트: 봇 자동/수동 토글
+        window.toggleAutoBots = async () => {
+            if (!currentRoomId || !localPlayer.isHost) return;
+            playSound('click');
+            try {
+                await updateDoc(doc(db, 'rooms', currentRoomId), { autoBots: !currentRoomData?.autoBots });
+                showToast(!currentRoomData?.autoBots ? '🤖 봇 자동 진행 켜짐' : '봇 수동 조종으로 전환');
+            } catch (e) { console.error('봇 자동 토글 실패:', e); }
+        };
+
         function hostControlBotCard(botId) {
             const bot = currentRoomData?.players?.[botId];
             if (!canControlBot(bot)) return;
@@ -2499,11 +2559,56 @@
                 snapshot.docs.forEach(d => batch.delete(d.ref));
                 await batch.commit();
                 showToast(`${snapshot.size}개의 방을 삭제했습니다.`);
+                hideCustomAlert();
             } catch (e) {
                 console.error('Failed to clear rooms:', e);
                 showCustomAlert('방 삭제 중 오류가 발생했습니다: ' + e.message);
             }
         }
+
+        window.clearAllGhostRooms = clearAllGhostRooms;
+        // [DEV] 방 목록을 불러와 방별로 선택 삭제 + 전체 삭제
+        window.showRoomAdmin = async () => {
+            if (!isDevMode) return;
+            playSound('popupOpen');
+            showCustomAlertWithHTML('<div class="text-gray-300">방 목록을 불러오는 중...</div>');
+            try {
+                const snapshot = await getDocs(collection(db, 'rooms'));
+                if (snapshot.empty) { showCustomAlertWithHTML('<div class="text-gray-300 mb-4">현재 방이 없습니다.</div><button onclick="hideCustomAlert()" class="btn-secondary w-full">닫기</button>'); return; }
+                const rows = snapshot.docs.map(d => {
+                    const r = d.data();
+                    const cnt = r.players ? Object.keys(r.players).length : 0;
+                    const st = r.status === 'waiting' ? '<span class="text-green-400">대기중</span>' : '<span class="text-orange-400">진행중</span>';
+                    const name = (r.name || '(이름없음)').replace(/</g, '&lt;');
+                    const host = (r.host?.nickname || '?').replace(/</g, '&lt;');
+                    return `<div class="flex items-center justify-between bg-black/30 rounded-lg p-2 gap-2">
+                        <div class="text-left text-sm min-w-0">
+                            <div class="font-bold truncate">${name} ${st}</div>
+                            <div class="text-gray-400 text-xs truncate">호스트 ${host} · ${cnt}명 · ${r.gameMode || 'classic'}</div>
+                        </div>
+                        <button onclick="deleteOneRoom('${d.id}')" class="flex-shrink-0 bg-red-700 hover:bg-red-600 text-white text-xs font-bold py-2 px-3 rounded">삭제</button>
+                    </div>`;
+                }).join('');
+                showCustomAlertWithHTML(`
+                    <div class="text-lg font-bold mb-2">방 관리 (${snapshot.size}개)</div>
+                    <div class="space-y-2 max-h-[45vh] overflow-y-auto text-left mb-3">${rows}</div>
+                    <div class="flex gap-2">
+                        <button onclick="clearAllGhostRooms()" class="flex-1 bg-red-800 hover:bg-red-700 text-white font-bold py-2 rounded-lg text-sm">전체 삭제</button>
+                        <button onclick="hideCustomAlert()" class="flex-1 btn-secondary py-2">닫기</button>
+                    </div>`);
+            } catch (e) {
+                console.error('방 목록 불러오기 실패:', e);
+                showCustomAlertWithHTML('방 목록을 불러오지 못했습니다: ' + e.message + '<br><button onclick="hideCustomAlert()" class="btn-secondary w-full mt-3">닫기</button>');
+            }
+        };
+        window.deleteOneRoom = async (roomId) => {
+            if (!isDevMode || !roomId) return;
+            try {
+                await deleteDoc(doc(db, 'rooms', roomId));
+                showToast('방을 삭제했습니다.');
+                showRoomAdmin(); // 목록 새로고침
+            } catch (e) { console.error('방 삭제 실패:', e); showToast('삭제 실패: ' + e.message); }
+        };
 
         function showCustomAlert(message) {
             document.getElementById('custom-alert-text').innerHTML = message;
@@ -3159,14 +3264,7 @@
                 const devClearBtn = document.getElementById('dev-clear-rooms-btn');
                 if (devClearBtn) {
                     devClearBtn.classList.remove('hidden');
-                    devClearBtn.addEventListener('click', () => {
-                        playSound('click');
-                        showCustomAlertWithHTML(`모든 방을 삭제하시겠습니까? (진행 중인 게임 포함)<br/><br/><div class="flex justify-center gap-4"><button id="dev-confirm-clear" class="btn-primary">예, 전부 삭제</button><button onclick="hideCustomAlert()" class="btn-secondary">취소</button></div>`);
-                        setTimeout(() => {
-                            const c = document.getElementById('dev-confirm-clear');
-                            if (c) c.addEventListener('click', () => { hideCustomAlert(); clearAllGhostRooms(); });
-                        }, 0);
-                    });
+                    devClearBtn.addEventListener('click', () => { playSound('click'); showRoomAdmin(); });
                 }
             }
             
@@ -3972,7 +4070,7 @@
                       </button>
                       <button id="rulebook-btn-main" class="w-full btn-secondary text-lg sm:text-xl py-2 sm:py-3">게임 룰북</button>
                       <button onclick="showQrPopup()" class="w-full btn-secondary text-lg sm:text-xl py-2 sm:py-3">📱 QR로 친구 초대</button>
-                      <button id="dev-clear-rooms-btn" class="hidden w-full bg-red-700/80 hover:bg-red-600 text-white font-bold py-2 rounded-lg text-sm">[DEV] 유령방 전체 삭제</button>
+                      <button id="dev-clear-rooms-btn" class="hidden w-full bg-red-700/80 hover:bg-red-600 text-white font-bold py-2 rounded-lg text-sm">[DEV] 방 관리 (선택/전체 삭제)</button>
                       <button id="dev-intro-btn" class="hidden w-full bg-indigo-700/80 hover:bg-indigo-600 text-white font-bold py-2 rounded-lg text-sm">[DEV] 인트로 이미지 관리</button>
                  </div>
                  <div class="creator-credit">
@@ -4063,6 +4161,7 @@
                         </div>
                         <div id="role-composition" class="hidden mt-3 text-center text-sm bg-black/20 border border-gray-500/30 rounded-lg py-2 px-3"></div>
                         <button id="demon-toggle-btn" onclick="toggleDemon()" class="hidden mt-3 w-full bg-purple-800/60 hover:bg-purple-700/70 border border-purple-400/50 text-purple-100 font-bold py-2 px-4 rounded-lg text-sm">👹 도깨비 생성</button>
+                        <button id="autobot-toggle-btn" onclick="toggleAutoBots()" class="hidden mt-2 w-full bg-green-800/50 hover:bg-green-700/60 border border-green-500/50 text-green-100 font-bold py-2 px-4 rounded-lg text-sm">🤖 봇 조종: 수동</button>
                         <div id="demon-notice" class="hidden mt-2 text-center text-xs text-purple-300/90">👹 도깨비 규칙 활성 — 측정 동점이면 도깨비 단독 승리</div>
                     </div>
                 </div>
