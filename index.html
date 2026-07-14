@@ -40,9 +40,12 @@
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
         let observationResultTimer = null; // 측정 완료 후 결과 공개 예약 타이머(중복/경쟁 방지)
-        const APP_VERSION = 'v1.41'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
+        const APP_VERSION = 'v1.42'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
         // 최근 업데이트 이력(최신순, 최근 5개 유지)
         const CHANGELOG = [
+            { v: 'v1.42', date: '2026-07-14', items: [
+                '개발자 모드: 호스트가 아니어도 각자 봇을 추가하고, 자기가 만든 봇만 직접 조종',
+            ]},
             { v: 'v1.41', date: '2026-07-14', items: [
                 '📱 QR로 친구 초대 — 메인 메뉴 버튼 + 대기방 방 ID 옆 QR 아이콘',
             ]},
@@ -56,9 +59,6 @@
             { v: 'v1.38', date: '2026-07-12', items: [
                 '투표·행동 제한시간 90초 → 60초, 호스트 "+30초" 연장 버튼을 투표·행동에도 적용',
                 '투표·행동이 모두 완료되면 즉시 다음 단계로 진행',
-            ]},
-            { v: 'v1.37', date: '2026-07-12', items: [
-                '개발자 모드가 기기에 영구 저장되던 문제 수정 — 이제 이 세션에서만 유지(앱 종료 시 자동 해제)',
             ]},
         ];
         let submittedActionToken = null; // 이번 단계에 투표/행동을 보냈는지 추적(반영 안 되면 다시 안내)
@@ -639,7 +639,7 @@
             
             const emptySlotsCount = maxPlayers - playerCount;
              for (let i = 0; i < emptySlotsCount; i++) {
-                 if (isDevMode && localPlayer.isHost) {
+                 if (isDevMode) {
                       playerSlotsEl.innerHTML += `<button onclick="addBotPlayer()" class="bg-green-800/30 p-4 rounded-lg flex items-center justify-center border-2 border-dashed border-green-500/60 hover:bg-green-700/40 active:scale-95 transition-colors min-h-[64px]"><span class="text-green-300 font-bold text-lg">🤖 봇 추가</span></button>`;
                  } else {
                       playerSlotsEl.innerHTML += `<div class="bg-black/20 p-4 rounded-lg flex items-center justify-center border-2 border-dashed border-gray-600/50"><span class="text-gray-500">빈 슬롯</span></div>`;
@@ -986,6 +986,35 @@
                 `;
             }
 
+            // 개발자 모드: 내가 만든 봇 조종 패널 (호스트가 아니어도 자기 봇을 조종)
+            let myBotsHtml = '';
+            if (isDevMode) {
+                const myBots = Object.values(players).filter(p => p.ownerId === localPlayer.id && p.isAlive);
+                if (myBots.length > 0) {
+                    myBotsHtml = `<div class="screen-panel p-4 border border-green-500/40">
+                        <h3 class="font-bold mb-2 text-green-300">🤖 내 봇 조종 (개발자)</h3>
+                        <div class="space-y-2">
+                        ${myBots.map(b => {
+                            let btns = '';
+                            if (gameState.subPhase === 'VOTE') {
+                                btns = votes[b.id] ? '<span class="text-green-400 text-sm">투표완료</span>' : `<button onclick="hostControlBot('${b.id}','VOTE')" class="text-xs bg-blue-600 text-white px-3 py-1 rounded">투표</button>`;
+                            } else if (gameState.subPhase === 'ACTION') {
+                                if (b.currentRole === 'CITIZEN') btns = '<span class="text-gray-400 text-sm">행동 없음</span>';
+                                else btns = nightActions[b.id] ? '<span class="text-green-400 text-sm">행동완료</span>' : `<button onclick="hostControlBot('${b.id}','ACTION')" class="text-xs bg-purple-600 text-white px-3 py-1 rounded">행동</button>`;
+                            }
+                            const card = b.abilityCard ? abilityCardDeck[b.abilityCard] : null;
+                            const cardBtn = (card && !b.hasUsedCard && isCardUsableNow(card, gameState)) ? `<button onclick="hostControlBotCard('${b.id}')" class="text-xs bg-yellow-600 text-black px-3 py-1 rounded ml-1">카드</button>` : '';
+                            const chips = b.quantumState.map(c => `<span class="inline-block w-3 h-3 rounded ${c === 'AEON' ? 'bg-red-500' : 'bg-blue-500'}"></span>`).join('');
+                            return `<div class="flex items-center justify-between bg-black/20 rounded p-2 gap-2">
+                                <span class="text-sm"><b>${b.number}.${b.nickname}</b> <span class="ml-1 inline-flex gap-0.5 align-middle">${chips}</span></span>
+                                <span class="flex-shrink-0">${btns}${cardBtn}</span>
+                            </div>`;
+                        }).join('')}
+                        </div>
+                    </div>`;
+                }
+            }
+
             mainContentEl.innerHTML = `
                 <div id="player-board-${me.id}" class="screen-panel p-6 border-2 border-cyan-300/50">
                     <h2 class="title-text text-2xl font-bold text-center mb-4">나의 상태판</h2>
@@ -993,6 +1022,7 @@
                         ${myChipsHtml}
                     </div>
                 </div>
+                ${myBotsHtml}
                 ${myCardHtml}
                 <div class="screen-panel p-4">
                     <h3 class="font-bold mb-2">다른 플레이어</h3>
@@ -2269,9 +2299,9 @@
         };
 
         // --- 개발자 모드 전용 함수 ---
+        // 개발자 모드면 호스트가 아니어도 봇을 추가할 수 있고, 봇에는 만든 사람(ownerId)이 기록됨
         async function addBotPlayer() {
-            if (!isDevMode) { showToast('개발자 모드(?dev=true)에서만 가능합니다.'); return; }
-            if (!localPlayer.isHost) { showToast('호스트만 봇을 추가할 수 있습니다.'); return; }
+            if (!isDevMode) { showToast('개발자 모드에서만 가능합니다.'); return; }
             if (!currentRoomId) { showToast('방 정보를 찾을 수 없습니다.'); return; }
             playSound('click');
             try {
@@ -2280,6 +2310,7 @@
                     const roomDoc = await transaction.get(roomRef);
                     if (!roomDoc.exists()) throw new Error('방이 존재하지 않습니다.');
                     const room = roomDoc.data();
+                    if (room.status !== 'waiting') throw new Error('게임 중에는 봇을 추가할 수 없습니다.');
                     const playerCount = Object.keys(room.players || {}).length;
                     if (playerCount >= (room.maxPlayers || 12)) throw new Error('방이 가득 찼습니다.');
 
@@ -2287,22 +2318,28 @@
                     let newPlayerNumber = 1;
                     while (existingNumbers.includes(newPlayerNumber)) { newPlayerNumber++; }
 
-                    const botId = `bot_${Date.now()}`;
-                    const botData = { id: botId, nickname: `Bot ${newPlayerNumber}`, isReady: true, number: newPlayerNumber, isAlive: true, quantumState: [], finalRole: null, initialRole: null, currentRole: null, abilityCard: null, hasUsedCard: false };
+                    const botId = `bot_${Date.now()}_${Math.floor(Math.random()*1000)}`;
+                    const ownerNick = (localPlayer.nickname || '?').slice(0, 3);
+                    const botData = { id: botId, nickname: `봇${newPlayerNumber}(${ownerNick})`, isReady: true, number: newPlayerNumber, isAlive: true, ownerId: localPlayer.id, quantumState: [], finalRole: null, initialRole: null, currentRole: null, abilityCard: null, hasUsedCard: false };
                     transaction.update(roomRef, { [`players.${botId}`]: botData });
                 });
-                showToast('🤖 봇이 추가되었습니다.');
+                showToast('🤖 내 봇이 추가되었습니다.');
             } catch (e) {
                 console.error('봇 추가 실패:', e);
                 showCustomAlert('봇 추가 실패: ' + (e.message || e));
             }
         };
 
+        // 봇을 조종할 수 있는가: 개발자 모드 + (호스트 or 그 봇의 주인)
+        function canControlBot(bot) {
+            return isDevMode && !!bot && (localPlayer.isHost || bot.ownerId === localPlayer.id);
+        }
         function hostControlBot(botId, controlType) {
-            if (!isDevMode || !localPlayer.isHost) return;
-            actingBotId = botId; 
             const room = currentRoomData;
-            const bot = room.players[botId];
+            const b0 = room?.players?.[botId];
+            if (!canControlBot(b0)) return;
+            actingBotId = botId;
+            const bot = b0;
 
             if (controlType === 'VOTE') {
                 let voteTargets;
@@ -2324,9 +2361,9 @@
         };
 
         function hostControlBotCard(botId) {
-            if (!isDevMode || !localPlayer.isHost) return;
+            const bot = currentRoomData?.players?.[botId];
+            if (!canControlBot(bot)) return;
             actingBotId = botId;
-            const bot = currentRoomData.players[botId];
             const card = abilityCardDeck[bot.abilityCard];
             showCustomAlertWithHTML(`'${bot.nickname}'의 '${card.name}' 카드를 사용하시겠습니까? <br/><br/> <div class="flex justify-center gap-4"><button onclick="confirmUseCard(true)" class="btn-primary">예</button><button onclick="hideCustomAlert()" class="btn-secondary">아니요</button></div>`);
         };
