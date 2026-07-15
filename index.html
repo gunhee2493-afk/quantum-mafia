@@ -40,11 +40,11 @@
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
         let observationResultTimer = null; // 측정 완료 후 결과 공개 예약 타이머(중복/경쟁 방지)
-        const APP_VERSION = 'v1.48'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
+        const APP_VERSION = 'v1.49'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
         // 최근 업데이트 이력(최신순, 최근 5개 유지)
         const CHANGELOG = [
-            { v: 'v1.48', date: '2026-07-15', items: [
-                '뒤로가기 종료 확인이 첫 화면에서 그냥 꺼지던 문제 수정(사용자 조작 후 가로채기 무장)',
+            { v: 'v1.49', date: '2026-07-15', items: [
+                '첫 화면 뒤로가기 시 앱이 그냥 꺼지던 문제 재수정(로드 즉시 + 첫 조작 이중 무장)',
             ]},
             { v: 'v1.47', date: '2026-07-14', items: [
                 '최초 화면에서 뒤로가기로 종료 시 "앱을 종료하시겠습니까?" 확인 팝업 추가',
@@ -54,10 +54,6 @@
             ]},
             { v: 'v1.45', date: '2026-07-14', items: [
                 '대기방 노벨상 1위 표시 — 단독 1위 👑금관+금빛, 공동 1위 🥇금메달+은은한 금빛',
-            ]},
-            { v: 'v1.44', date: '2026-07-14', items: [
-                '개발자 모드: 봇 자동/수동 조종 토글(자동이면 봇이 무작위로 투표·행동)',
-                '개발자 모드: 방 관리 — 방별 선택 삭제 + 전체 삭제',
             ]},
         ];
         let submittedActionToken = null; // 이번 단계에 투표/행동을 보냈는지 추적(반영 안 되면 다시 안내)
@@ -282,20 +278,16 @@
                 });
             }, 0);
         }
-        let backHandlerArmed = false;
         function initBackHandler() {
-            // Chrome(안드로이드)은 '사용자 조작 없이 push한 히스토리'를 뒤로가기 때 건너뜀 →
-            // 첫 사용자 제스처(터치/클릭/키) 이후에 방어 상태를 넣어야 가로채기가 동작함
-            const arm = () => {
-                if (backHandlerArmed) return;
-                backHandlerArmed = true;
-                history.pushState({ app: true }, '');
-            };
+            // 로드 즉시 방어 상태 1개 넣음(PWA/일부 브라우저는 이걸로 바로 가로챔)
+            history.pushState({ app: true }, '');
+            // Chrome(안드로이드)은 '사용자 조작 없이 push한 히스토리'를 뒤로가기 때 건너뛸 수 있음 →
+            // 첫 사용자 제스처 때 조작 기반으로 한 번 더 확실히 무장
+            const rearm = () => { history.pushState({ app: true }, ''); };
             ['pointerdown', 'touchstart', 'mousedown', 'keydown'].forEach(ev =>
-                window.addEventListener(ev, arm, { capture: true }));
+                window.addEventListener(ev, rearm, { once: true, capture: true }));
             window.addEventListener('popstate', () => {
                 if (allowAppExit) { allowAppExit = false; return; } // 종료 확인 후 통과
-                if (!backHandlerArmed) return; // 아직 무장 전이면 그대로 통과
                 let handled = true;
                 try { handled = handleAppBack(); } catch (e) { console.error('back handler', e); }
                 if (handled) history.pushState({ app: true }, ''); // 재무장 → 다음 뒤로가기도 가로챔
