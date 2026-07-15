@@ -40,20 +40,24 @@
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
         let observationResultTimer = null; // 측정 완료 후 결과 공개 예약 타이머(중복/경쟁 방지)
-        const APP_VERSION = 'v1.49'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
+        const APP_VERSION = 'v1.46'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
         // 최근 업데이트 이력(최신순, 최근 5개 유지)
         const CHANGELOG = [
-            { v: 'v1.49', date: '2026-07-15', items: [
-                '첫 화면 뒤로가기 시 앱이 그냥 꺼지던 문제 재수정(로드 즉시 + 첫 조작 이중 무장)',
-            ]},
-            { v: 'v1.47', date: '2026-07-14', items: [
-                '최초 화면에서 뒤로가기로 종료 시 "앱을 종료하시겠습니까?" 확인 팝업 추가',
-            ]},
             { v: 'v1.46', date: '2026-07-14', items: [
                 '폰 시스템 뒤로가기 처리 — 앱을 갑자기 벗어나 방에서 비정상 이탈하던 문제 수정(팝업 닫기→나가기 확인→메뉴 이동 순)',
             ]},
             { v: 'v1.45', date: '2026-07-14', items: [
                 '대기방 노벨상 1위 표시 — 단독 1위 👑금관+금빛, 공동 1위 🥇금메달+은은한 금빛',
+            ]},
+            { v: 'v1.44', date: '2026-07-14', items: [
+                '개발자 모드: 봇 자동/수동 조종 토글(자동이면 봇이 무작위로 투표·행동)',
+                '개발자 모드: 방 관리 — 방별 선택 삭제 + 전체 삭제',
+            ]},
+            { v: 'v1.43', date: '2026-07-14', items: [
+                '제작자 로고 추가 — 메인 메뉴 하단에 양자과학교사연구회 원형 로고',
+            ]},
+            { v: 'v1.42', date: '2026-07-14', items: [
+                '개발자 모드: 호스트가 아니어도 각자 봇을 추가하고, 자기가 만든 봇만 직접 조종',
             ]},
         ];
         let submittedActionToken = null; // 이번 단계에 투표/행동을 보냈는지 추적(반영 안 되면 다시 안내)
@@ -259,35 +263,14 @@
                 showScreen('main-menu-screen'); return true;
             }
             if (s === 'main-menu-screen') { showScreen('nickname-screen'); return true; }
-            // 4) 최상위(닉네임): 종료 확인 팝업
-            showExitConfirm();
-            return true;
-        }
-        // 최초 화면에서 종료하려 할 때 확인 팝업
-        let allowAppExit = false;
-        function showExitConfirm() {
-            playSound('popupOpen');
-            showCustomAlertWithHTML(`앱을 종료하시겠습니까?<br/><br/><div class="flex justify-center gap-4"><button id="exit-confirm-yes" class="bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-6 rounded-lg">종료</button><button onclick="hideCustomAlert()" class="btn-secondary">취소</button></div>`);
-            setTimeout(() => {
-                const y = document.getElementById('exit-confirm-yes');
-                if (y) y.addEventListener('click', () => {
-                    hideCustomAlert();
-                    // 다음 뒤로가기를 가로채지 않고 통과시켜 앱에서 벗어남(브라우저 정책상 강제 종료는 불가)
-                    allowAppExit = true;
-                    history.back();
-                });
-            }, 0);
+            // 4) 최상위(닉네임): 두 번 연속 눌러야 실제로 종료
+            const now = Date.now();
+            if (now - lastTopBack < 2000) return false; // 종료 허용
+            lastTopBack = now; showToast('한 번 더 누르면 앱을 종료합니다'); return true;
         }
         function initBackHandler() {
-            // 로드 즉시 방어 상태 1개 넣음(PWA/일부 브라우저는 이걸로 바로 가로챔)
             history.pushState({ app: true }, '');
-            // Chrome(안드로이드)은 '사용자 조작 없이 push한 히스토리'를 뒤로가기 때 건너뛸 수 있음 →
-            // 첫 사용자 제스처 때 조작 기반으로 한 번 더 확실히 무장
-            const rearm = () => { history.pushState({ app: true }, ''); };
-            ['pointerdown', 'touchstart', 'mousedown', 'keydown'].forEach(ev =>
-                window.addEventListener(ev, rearm, { once: true, capture: true }));
             window.addEventListener('popstate', () => {
-                if (allowAppExit) { allowAppExit = false; return; } // 종료 확인 후 통과
                 let handled = true;
                 try { handled = handleAppBack(); } catch (e) { console.error('back handler', e); }
                 if (handled) history.pushState({ app: true }, ''); // 재무장 → 다음 뒤로가기도 가로챔
