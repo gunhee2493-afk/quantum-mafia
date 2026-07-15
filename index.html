@@ -40,9 +40,12 @@
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
         let observationResultTimer = null; // 측정 완료 후 결과 공개 예약 타이머(중복/경쟁 방지)
-        const APP_VERSION = 'v1.44'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
+        const APP_VERSION = 'v1.45'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
         // 최근 업데이트 이력(최신순, 최근 5개 유지)
         const CHANGELOG = [
+            { v: 'v1.45', date: '2026-07-14', items: [
+                '대기방 노벨상 1위 표시 — 단독 1위 👑금관+금빛, 공동 1위 🥇금메달+은은한 금빛',
+            ]},
             { v: 'v1.44', date: '2026-07-14', items: [
                 '개발자 모드: 봇 자동/수동 조종 토글(자동이면 봇이 무작위로 투표·행동)',
                 '개발자 모드: 방 관리 — 방별 선택 삭제 + 전체 삭제',
@@ -55,9 +58,6 @@
             ]},
             { v: 'v1.41', date: '2026-07-14', items: [
                 '📱 QR로 친구 초대 — 메인 메뉴 버튼 + 대기방 방 ID 옆 QR 아이콘',
-            ]},
-            { v: 'v1.40', date: '2026-07-14', items: [
-                '📱 홈 화면에 앱으로 설치 가능(PWA) — 커스텀 에이온 아이콘, 앱 이름 "AEON", 전체화면 실행',
             ]},
         ];
         let submittedActionToken = null; // 이번 단계에 투표/행동을 보냈는지 추적(반영 안 되면 다시 안내)
@@ -611,20 +611,29 @@
             const entangledPlayerIds = entangledPairs.flat();
 
             const nobelMap = room.nobelPrizes || {};
+            // 노벨상 1위 판정: 최다 보유자에게 왕관(단독)/금메달(공동) 효과
+            const maxNobel = Math.max(0, ...playerList.map(p => nobelMap[p.id] || 0));
+            const leaderCount = playerList.filter(p => (nobelMap[p.id] || 0) === maxNobel && maxNobel > 0).length;
             playerList.forEach(p => {
                     const isEntangled = entangledPlayerIds.includes(p.id);
                     const nobel = nobelMap[p.id] || 0;
+                    const isLeader = maxNobel > 0 && nobel === maxNobel;
+                    const isSoleLeader = isLeader && leaderCount === 1;
+                    const leaderClass = isSoleLeader ? 'lobby-leader-sole' : (isLeader ? 'lobby-leader-tie' : '');
+                    const crown = isSoleLeader ? '<span class="leader-crown" title="노벨상 1위">👑</span>' : (isLeader ? '<span class="leader-medal" title="노벨상 공동 1위">🥇</span>' : '');
                     const nobelHtml = nobel > 0
                         ? `<div class="mt-1 text-sm" title="노벨상 ${nobel}개">${nobel <= 5 ? '🏅'.repeat(nobel) : `🏅×${nobel}`}</div>`
                         : '';
                     // 호스트는 플레이어 칸 전체를 눌러 관리 메뉴(강퇴/준비 대신/노벨상)를 연다 → 터치하기 쉬움
-                    const clickable = localPlayer.isHost ? `onclick="openLobbyPlayerMenu('${p.id}')" class="bg-black/20 p-4 rounded-lg shadow-inner-dark cursor-pointer hover:bg-black/30 active:scale-[0.98] transition"` : `class="bg-black/20 p-4 rounded-lg shadow-inner-dark"`;
+                    const baseCls = `bg-black/20 p-4 rounded-lg shadow-inner-dark ${leaderClass}`;
+                    const clickable = localPlayer.isHost ? `onclick="openLobbyPlayerMenu('${p.id}')" class="${baseCls} cursor-pointer hover:bg-black/30 active:scale-[0.98] transition"` : `class="${baseCls}"`;
                     playerSlotsEl.innerHTML += `
                         <div ${clickable}>
                              <div class="flex items-center justify-between">
                                  <div class="flex items-center space-x-3">
                                      <div class="bg-orange-500 text-white font-bold rounded-full w-8 h-8 flex items-center justify-center text-lg shadow-lg">${p.number}</div>
                                      <span class="text-white text-lg font-bold">${p.nickname}</span>
+                                     ${crown}
                                      ${isEntangled ? '<span title="양자 얽힘 상태">🔗</span>' : ''}
                                  </div>
                                  <div class="flex items-center gap-1">
@@ -3994,6 +4003,30 @@
         }
         #update-tab:hover { background: linear-gradient(180deg, rgba(64,54,40,0.98), rgba(36,29,20,0.98)); box-shadow: 0 4px 14px rgba(201,162,75,0.25); }
         #update-tab:active { transform: scale(0.96); }
+
+        /* 노벨상 1위 효과 — 단독 1위: 금관+강한 금빛 / 공동 1위: 금메달+은은한 금빛 */
+        .lobby-leader-sole {
+            border: 2px solid #ffd54a !important;
+            background: linear-gradient(150deg, rgba(255,213,74,0.20), rgba(0,0,0,0.25)) !important;
+            animation: leaderGlow 1.8s ease-in-out infinite;
+        }
+        @keyframes leaderGlow {
+            0%, 100% { box-shadow: 0 0 8px rgba(255,213,74,0.45), inset 0 0 8px rgba(255,213,74,0.15); }
+            50%      { box-shadow: 0 0 22px rgba(255,213,74,0.9),  inset 0 0 14px rgba(255,213,74,0.3); }
+        }
+        .lobby-leader-tie {
+            border: 1.5px solid rgba(255,213,74,0.55) !important;
+            background: linear-gradient(150deg, rgba(255,213,74,0.10), rgba(0,0,0,0.25)) !important;
+            box-shadow: 0 0 8px rgba(255,213,74,0.25);
+        }
+        .leader-crown {
+            font-size: 1.25rem;
+            filter: drop-shadow(0 0 6px rgba(255,213,74,0.9));
+            animation: crownBob 1.6s ease-in-out infinite;
+            display: inline-block;
+        }
+        @keyframes crownBob { 0%,100% { transform: translateY(0) rotate(-4deg); } 50% { transform: translateY(-3px) rotate(4deg); } }
+        .leader-medal { font-size: 1.1rem; }
 
         /* 제작자(양자과학교사연구회) 크레딧 */
         .creator-credit {
