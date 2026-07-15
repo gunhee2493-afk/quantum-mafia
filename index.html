@@ -40,9 +40,12 @@
         let activeTimerEndAt = null; // 현재 카운트다운 중인 종료 시각(ms). 스냅샷마다 타이머가 리셋되는 것을 방지
         let isProceeding = false;    // 단계 진행 중복 실행 방지 락
         let observationResultTimer = null; // 측정 완료 후 결과 공개 예약 타이머(중복/경쟁 방지)
-        const APP_VERSION = 'v1.45'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
+        const APP_VERSION = 'v1.46'; // 첫 화면 '업데이트' 탭 + 개발자 모드 모서리 표시
         // 최근 업데이트 이력(최신순, 최근 5개 유지)
         const CHANGELOG = [
+            { v: 'v1.46', date: '2026-07-14', items: [
+                '폰 시스템 뒤로가기 처리 — 앱을 갑자기 벗어나 방에서 비정상 이탈하던 문제 수정(팝업 닫기→나가기 확인→메뉴 이동 순)',
+            ]},
             { v: 'v1.45', date: '2026-07-14', items: [
                 '대기방 노벨상 1위 표시 — 단독 1위 👑금관+금빛, 공동 1위 🥇금메달+은은한 금빛',
             ]},
@@ -55,9 +58,6 @@
             ]},
             { v: 'v1.42', date: '2026-07-14', items: [
                 '개발자 모드: 호스트가 아니어도 각자 봇을 추가하고, 자기가 만든 봇만 직접 조종',
-            ]},
-            { v: 'v1.41', date: '2026-07-14', items: [
-                '📱 QR로 친구 초대 — 메인 메뉴 버튼 + 대기방 방 ID 옆 QR 아이콘',
             ]},
         ];
         let submittedActionToken = null; // 이번 단계에 투표/행동을 보냈는지 추적(반영 안 되면 다시 안내)
@@ -236,6 +236,45 @@
         function hideRulebookPopup() {
             playSound('click');
             document.getElementById('rulebook-popup').classList.add('hidden');
+        }
+
+        // ===== 폰 시스템 뒤로가기 가로채기 (앱을 갑자기 벗어나 방에서 비정상 이탈하는 문제 방지) =====
+        let lastTopBack = 0;
+        function currentScreenId() { return document.querySelector('.screen:not(.hidden)')?.id; }
+        function topOpenPopup() {
+            // 뒤로가기로 닫을 정보성 팝업들(게임 진행용 투표/행동 팝업은 제외)
+            const ids = ['custom-alert-popup', 'qr-popup', 'confirm-leave-popup', 'rulebook-popup', 'memo-popup', 'event-log-popup', 'intro-admin-popup', 'create-room-popup', 'update-popup'];
+            for (const id of ids) { const el = document.getElementById(id); if (el && !el.classList.contains('hidden')) return el; }
+            return null;
+        }
+        function handleAppBack() {
+            // 1) 열려 있는 팝업이 있으면 그걸 닫음
+            const popup = topOpenPopup();
+            if (popup) { popup.classList.add('hidden'); return true; }
+            const s = currentScreenId();
+            // 2) 방(로비/게임) 안이면 '나가기' 확인창
+            if (['lobby-screen', 'game-screen', 'observation-screen', 'end-result-screen'].includes(s)) {
+                if (!document.getElementById('confirm-leave-popup').classList.contains('hidden')) return true;
+                showConfirmLeavePopup(); return true;
+            }
+            // 3) 하위 화면이면 메인 메뉴로
+            if (['room-list-screen', 'create-mode-selection-screen', 'join-mode-selection-screen'].includes(s)) {
+                if (roomListUnsubscribe) { roomListUnsubscribe(); roomListUnsubscribe = null; }
+                showScreen('main-menu-screen'); return true;
+            }
+            if (s === 'main-menu-screen') { showScreen('nickname-screen'); return true; }
+            // 4) 최상위(닉네임): 두 번 연속 눌러야 실제로 종료
+            const now = Date.now();
+            if (now - lastTopBack < 2000) return false; // 종료 허용
+            lastTopBack = now; showToast('한 번 더 누르면 앱을 종료합니다'); return true;
+        }
+        function initBackHandler() {
+            history.pushState({ app: true }, '');
+            window.addEventListener('popstate', () => {
+                let handled = true;
+                try { handled = handleAppBack(); } catch (e) { console.error('back handler', e); }
+                if (handled) history.pushState({ app: true }, ''); // 재무장 → 다음 뒤로가기도 가로챔
+            });
         }
 
         function showConfirmLeavePopup() {
@@ -3422,6 +3461,7 @@
             });
 
             showScreen('nickname-screen');
+            initBackHandler(); // 폰 시스템 뒤로가기 가로채기
             loadIntroSlideshow(); // 첫 화면 인트로 이미지 로드(Firestore config/intro)
 
             // 브라우저 자동재생 정책: 첫 터치/클릭 때 메뉴 음악 재생을 재시도
